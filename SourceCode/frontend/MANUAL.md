@@ -3,10 +3,11 @@
 ## 1. Chuẩn bị môi trường
 - Node.js >= 18
 - npm >= 9
-- Các giá trị môi trường tùy chọn (tạo file `.env` hoặc đặt khi chạy):
+- Các giá trị môi trường (đã cấu hình sẵn fallback):
   - `VITE_API_BASE_URL` – URL backend REST (mặc định `http://localhost:5000`)
-  - `VITE_MQTT_URL` – URL WebSocket MQTT (mặc định `wss://broker.hivemq.com:8884/mqtt`)
-  - `VITE_DEVICE_ID` – ID thiết bị feeder, ví dụ `demo-feeder-01`
+  - `VITE_MQTT_URL` – URL WebSocket MQTT (mặc định `wss://e4b01f831a674150bbae2854b6f1735c.s1.eu.hivemq.cloud:8884/mqtt`)
+  - `VITE_DEVICE_ID` – ID thiết bị feeder (mặc định `petfeeder-feed-node-01`)
+  - `VITE_MQTT_USERNAME` / `VITE_MQTT_PASSWORD` – tài khoản HiveMQ Cloud (mặc định `quandotrung` / `Pass1235`)
 
 ## 2. Cài đặt
 ```bash
@@ -28,14 +29,14 @@ npm run preview   # kiểm tra gói build
 Kết quả build nằm tại thư mục `frontend/dist`.
 
 ## 5. Cấu trúc chính
-- `src/pages` – các trang Dashboard, Manual Feed, Schedule, Alerts
+- `src/pages` – các trang Dashboard, Manual Feed, Schedule
 - `src/components` – Sidebar, TopBar, StatCard, v.v.
 - `src/services/api.js` – cấu hình REST + Axios
 - `src/services/mqtt.js` – quản lý kết nối MQTT
 - `src/styles.css` – phong cách giao diện xanh trắng kiểu Blynk
 
 ## 6. Luồng hoạt động
-1. Giao diện hiển thị luôn (không cần đăng nhập).
+1. Hệ thống sử dụng 1 tài khoản mặc định trên backend, không cần đăng nhập/token.
 2. MQTT:
    - Subscribe `feeder/{deviceId}/telemetry`, `.../ack`, `.../alert`
    - Gửi lệnh thủ công qua topic `feeder/{deviceId}/command` với payload `{ "action": "feed_now" }`

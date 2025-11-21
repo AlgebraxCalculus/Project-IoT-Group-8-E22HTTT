@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { createMqttClient, publishFeedNow } from '../services/mqtt.js';
+import { createMqttClient } from '../services/mqtt.js';
+import { FeedAPI } from '../services/api.js';
 
-const DEVICE_ID = import.meta.env.VITE_DEVICE_ID || 'demo-feeder-01';
+const DEVICE_ID = import.meta.env.VITE_DEVICE_ID || 'petfeeder-feed-node-01';
 
 const ManualFeed = () => {
   const [mqttStatus, setMqttStatus] = useState('offline');
   const [ackMessage, setAckMessage] = useState('');
   const [micStatus, setMicStatus] = useState('idle');
+  const [loading, setLoading] = useState(false);
   const clientRef = useRef(null);
   const recognitionRef = useRef(null);
   const speechDetectedRef = useRef(false);
@@ -21,9 +23,17 @@ const ManualFeed = () => {
     return () => client?.end(true);
   }, []);
 
-  const handleFeedNow = () => {
-    publishFeedNow(clientRef.current, DEVICE_ID);
-    setAckMessage('Command sent. Awaiting acknowledgement...');
+  const handleFeedNow = async () => {
+    setLoading(true);
+    setAckMessage('Sending feed command...');
+    try {
+      const { data } = await FeedAPI.manual();
+      setAckMessage(data.message || 'Feed command sent successfully!');
+    } catch (err) {
+      setAckMessage(err.response?.data?.message || 'Failed to send feed command');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleVoiceFeed = async () => {
@@ -48,12 +58,20 @@ const ManualFeed = () => {
     speechDetectedRef.current = false;
     recognition.start();
 
-    recognition.onresult = (event) => {
+    recognition.onresult = async (event) => {
       speechDetectedRef.current = true;
       const transcript = event.results[0][0].transcript.toLowerCase();
       if (transcript.includes('feed') || transcript.includes('start')) {
-        handleFeedNow();
-        setAckMessage(`Voice command accepted: "${transcript}"`);
+        setLoading(true);
+        setAckMessage(`Voice command accepted: "${transcript}". Sending...`);
+        try {
+          const { data } = await FeedAPI.voice(transcript);
+          setAckMessage(data.message || `Voice command executed: "${transcript}"`);
+        } catch (err) {
+          setAckMessage(err.response?.data?.message || 'Failed to execute voice command');
+        } finally {
+          setLoading(false);
+        }
       } else {
         setAckMessage(`Heard "${transcript}". Say "feed now" to dispense.`);
       }
@@ -90,8 +108,8 @@ const ManualFeed = () => {
         <div className="card">
           <h3>Manual Feed</h3>
           <p>Dispense a single portion immediately.</p>
-          <button className="btn btn--primary btn--lg" type="button" onClick={handleFeedNow}>
-            Feed Now
+          <button className="btn btn--primary btn--lg" type="button" onClick={handleFeedNow} disabled={loading}>
+            {loading ? 'Sending...' : 'Feed Now'}
           </button>
         </div>
         <div className="card">

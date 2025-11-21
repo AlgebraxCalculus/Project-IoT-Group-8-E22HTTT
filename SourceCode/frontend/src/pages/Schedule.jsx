@@ -2,19 +2,39 @@ import { useEffect, useState } from 'react';
 import { ScheduleAPI } from '../services/api.js';
 
 const dayOptions = [
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-  'Sunday',
+  { name: 'Monday', value: 1 },
+  { name: 'Tuesday', value: 2 },
+  { name: 'Wednesday', value: 3 },
+  { name: 'Thursday', value: 4 },
+  { name: 'Friday', value: 5 },
+  { name: 'Saturday', value: 6 },
+  { name: 'Sunday', value: 0 },
 ];
+
+const dayNameToNumber = {
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  Saturday: 6,
+  Sunday: 0,
+};
+
+const dayNumberToName = {
+  0: 'Sunday',
+  1: 'Monday',
+  2: 'Tuesday',
+  3: 'Wednesday',
+  4: 'Thursday',
+  5: 'Friday',
+  6: 'Saturday',
+};
 
 const emptyForm = {
   name: 'Feeding schedule',
   time: '08:00',
-  daysOfWeek: ['Monday'],
+  daysOfWeek: [1], // Monday
   amount: 50,
   isActive: true,
 };
@@ -31,7 +51,7 @@ const Schedule = () => {
     setError('');
     try {
       const { data } = await ScheduleAPI.list();
-      setSchedules(data || []);
+      setSchedules(data.schedules || []);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to load schedules');
     } finally {
@@ -52,12 +72,12 @@ const Schedule = () => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleToggleDay = (day) => {
+  const handleToggleDay = (dayValue) => {
     setForm((prev) => {
-      const exists = prev.daysOfWeek.includes(day);
+      const exists = prev.daysOfWeek.includes(dayValue);
       const daysOfWeek = exists
-        ? prev.daysOfWeek.filter((d) => d !== day)
-        : [...prev.daysOfWeek, day];
+        ? prev.daysOfWeek.filter((d) => d !== dayValue)
+        : [...prev.daysOfWeek, dayValue];
       return { ...prev, daysOfWeek };
     });
   };
@@ -86,7 +106,7 @@ const Schedule = () => {
     setForm({
       name: entry.name || 'Feeding schedule',
       time: entry.time,
-      daysOfWeek: entry.daysOfWeek?.length ? entry.daysOfWeek : ['Monday'],
+      daysOfWeek: Array.isArray(entry.daysOfWeek) && entry.daysOfWeek.length ? entry.daysOfWeek : [1],
       amount: entry.amount?.toString() ?? '0',
       isActive: Boolean(entry.isActive),
     });
@@ -145,12 +165,12 @@ const Schedule = () => {
             <div className="chip-group">
               {dayOptions.map((day) => (
                 <button
-                  key={day}
+                  key={day.value}
                   type="button"
-                  className={`chip ${form.daysOfWeek.includes(day) ? 'chip--active' : ''}`}
-                  onClick={() => handleToggleDay(day)}
+                  className={`chip ${form.daysOfWeek.includes(day.value) ? 'chip--active' : ''}`}
+                  onClick={() => handleToggleDay(day.value)}
                 >
-                  {day.slice(0, 3)}
+                  {day.name.slice(0, 3)}
                 </button>
               ))}
             </div>
@@ -197,7 +217,11 @@ const Schedule = () => {
               {schedules.map((entry) => (
                 <tr key={entry.id || entry._id}>
                   <td>{entry.name}</td>
-                  <td>{entry.daysOfWeek?.join(', ') || '—'}</td>
+                  <td>
+                    {Array.isArray(entry.daysOfWeek) && entry.daysOfWeek.length
+                      ? entry.daysOfWeek.map((d) => dayNumberToName[d] || d).join(', ')
+                      : '—'}
+                  </td>
                   <td>{entry.time}</td>
                   <td>{entry.amount}</td>
                   <td>{entry.isActive ? 'Active' : 'Paused'}</td>
