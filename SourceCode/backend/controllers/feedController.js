@@ -15,8 +15,8 @@ export const getFeedLogs = async (req, res) => {
 };
 
 export const manualFeed = async (req, res) => {
-  // Default amount is 200 grams
-  const amount = 200;
+  // Default amount is 50 grams
+  const amount = 50;
 
   try {
     const feedLog = await triggerManualFeed({
