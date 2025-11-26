@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthAPI } from '../services/api.js';
-import { useAuth } from '../hooks/useAuth.js';
+import { useAuth } from '../hooks/useAuth.jsx';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -31,7 +31,14 @@ const Login = () => {
       const redirectTo = location.state?.from?.pathname || '/';
       navigate(redirectTo, { replace: true });
     } catch (err) {
-      setError(err.response?.data?.message || 'Invalid credentials');
+      const apiError = err.response?.data;
+      if (apiError?.message) {
+        setError(apiError.message);
+      } else if (Array.isArray(apiError?.errors) && apiError.errors.length > 0) {
+        setError(apiError.errors[0].msg);
+      } else {
+        setError('Invalid credentials');
+      }
     } finally {
       setLoading(false);
     }

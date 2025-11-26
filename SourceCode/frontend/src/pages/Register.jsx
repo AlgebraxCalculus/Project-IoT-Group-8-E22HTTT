@@ -23,7 +23,14 @@ const Register = () => {
       setSuccess('Registration successful. Redirecting to login...');
       setTimeout(() => navigate('/login'), 1500);
     } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed');
+      const apiError = err.response?.data;
+      if (apiError?.message) {
+        setError(apiError.message);
+      } else if (Array.isArray(apiError?.errors) && apiError.errors.length > 0) {
+        setError(apiError.errors[0].msg);
+      } else {
+        setError('Registration failed');
+      }
     } finally {
       setLoading(false);
     }

@@ -16,7 +16,11 @@ const generateToken = (userId) => {
 export const register = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
+    const first = errors.array()[0];
+    return res.status(400).json({
+      message: first?.msg || "Validation failed",
+      errors: errors.array(),
+    });
   }
 
   const { username, password } = req.body;
@@ -53,7 +57,11 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
+    const first = errors.array()[0];
+    return res.status(400).json({
+      message: first?.msg || "Validation failed",
+      errors: errors.array(),
+    });
   }
 
   const { username, password } = req.body;

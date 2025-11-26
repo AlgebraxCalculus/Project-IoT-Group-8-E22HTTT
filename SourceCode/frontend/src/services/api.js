@@ -4,6 +4,30 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000',
 });
 
+// Gắn JWT (nếu có) vào mọi request
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    // eslint-disable-next-line no-param-reassign
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+export const AuthAPI = {
+  // Frontend dùng email/password, backend nhận username/password
+  login: ({ email, password }) =>
+    api.post('/api/auth/login', {
+      username: email,
+      password,
+    }),
+  register: ({ email, password }) =>
+    api.post('/api/auth/register', {
+      username: email,
+      password,
+    }),
+};
+
 export const ScheduleAPI = {
   list: () => api.get('/api/schedules/get'),
   create: (payload) => api.post('/api/schedules/create', payload),
@@ -21,5 +45,4 @@ export const FeedAPI = {
 };
 
 export default api;
-
 

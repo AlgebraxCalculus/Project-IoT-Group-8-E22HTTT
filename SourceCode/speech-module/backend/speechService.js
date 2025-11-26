@@ -149,6 +149,20 @@ class SpeechService {
     }
 
     const lowerText = text.toLowerCase().trim();
+
+    // Chuẩn hóa bỏ dấu tiếng Việt để xử lý các lỗi nghe nhầm (ví dụ: "chào ăn" thay vì "cho ăn")
+    const normalized = lowerText
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Sửa một số lỗi gần đúng phổ biến mà Whisper hay tạo ra
+    // "chao an" / "chao anh" -> "cho an"
+    // "chao" đứng trước "an/anh" -> "cho"
+    let corrected = normalized
+      .replace(/\bchao\s+an(h)?\b/g, 'cho an')
+      .replace(/\bchao\b/g, 'cho');
     const command = {
       action: 'unknown',
       amount: null,
@@ -166,7 +180,7 @@ class SpeechService {
     ];
 
     for (const pattern of amountPatterns) {
-      const match = lowerText.match(pattern);
+      const match = corrected.match(pattern);
       if (match) {
         let amount = parseInt(match[1]);
         
@@ -184,12 +198,17 @@ class SpeechService {
     // Xác định action
     const feedKeywords = [
       'cho ăn',
+      'cho an',
       'cho thú cưng ăn',
+      'cho thu cung an',
       'cho pet ăn',
+      'cho pet an',
       'feed',
       'feeding',
       'cho thức ăn',
+      'cho thuc an',
       'đổ thức ăn',
+      'do thuc an',
     ];
 
     const stopKeywords = [
@@ -209,7 +228,7 @@ class SpeechService {
       'lượng thức ăn',
     ];
 
-    if (feedKeywords.some(keyword => lowerText.includes(keyword))) {
+    if (feedKeywords.some(keyword => lowerText.includes(keyword) || corrected.includes(keyword))) {
       command.action = 'feed';
       command.confidence = 'high';
     } else if (stopKeywords.some(keyword => lowerText.includes(keyword))) {

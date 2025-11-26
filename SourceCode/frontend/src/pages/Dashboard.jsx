@@ -105,10 +105,6 @@ const Dashboard = () => {
           <p>
             MQTT status: <StatusBadge status={clientStatus === 'online' ? 'online' : 'offline'} />
           </p>
-          <p>
-            Device status:{' '}
-            <StatusBadge status={telemetry.online ? 'online' : 'offline'} />
-          </p>
         </div>
       </div>
 

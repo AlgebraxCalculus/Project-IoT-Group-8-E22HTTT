@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createMqttClient } from '../services/mqtt.js';
-import { FeedAPI } from '../services/api.js';
+import api, { FeedAPI } from '../services/api.js';
 
 const DEVICE_ID = import.meta.env.VITE_DEVICE_ID || 'petfeeder-feed-node-01';
 
@@ -10,8 +10,8 @@ const ManualFeed = () => {
   const [micStatus, setMicStatus] = useState('idle');
   const [loading, setLoading] = useState(false);
   const clientRef = useRef(null);
-  const recognitionRef = useRef(null);
-  const speechDetectedRef = useRef(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
   useEffect(() => {
     const client = createMqttClient({
@@ -37,62 +37,136 @@ const ManualFeed = () => {
   };
 
   const handleVoiceFeed = async () => {
-    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Recognition) {
-      setAckMessage('Speech recognition not supported in this browser.');
-      return;
-    }
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-      setMicStatus('idle');
+    // Nếu đang ghi âm thì dừng lại và gửi audio đi xử lý
+    if (micStatus === 'listening' && mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      setMicStatus('processing');
+      setAckMessage('⏳ Đang xử lý âm thanh...');
       return;
     }
 
-    const recognition = new Recognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    setMicStatus('listening');
-    setAckMessage('Listening... say "feed now"');
-    speechDetectedRef.current = false;
-    recognition.start();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setAckMessage('Trình duyệt không hỗ trợ ghi âm. Vui lòng dùng Chrome hoặc Edge.');
+      return;
+    }
 
-    recognition.onresult = async (event) => {
-      speechDetectedRef.current = true;
-      const transcript = event.results[0][0].transcript.toLowerCase();
-      if (transcript.includes('feed') || transcript.includes('start')) {
-        setLoading(true);
-        setAckMessage(`Voice command accepted: "${transcript}". Sending...`);
-        try {
-          const { data } = await FeedAPI.voice(transcript);
-          setAckMessage(data.message || `Voice command executed: "${transcript}"`);
-        } catch (err) {
-          setAckMessage(err.response?.data?.message || 'Failed to execute voice command');
-        } finally {
-          setLoading(false);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 48000,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      let mimeType = 'audio/webm;codecs=opus';
+      if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/webm';
+      }
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
-      } else {
-        setAckMessage(`Heard "${transcript}". Say "feed now" to dispense.`);
-      }
-      recognition.stop();
-    };
+      };
 
-    recognition.onerror = (event) => {
-      setAckMessage(`Mic error: ${event.error}`);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        await sendAudioToSpeechModule(audioBlob);
+        mediaRecorderRef.current = null;
+        audioChunksRef.current = [];
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setMicStatus('listening');
+      setAckMessage('🎙️ Đang ghi âm... hãy nói lệnh, ví dụ: "cho ăn 200 gram".');
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+      setAckMessage('Không thể truy cập microphone. Vui lòng kiểm tra quyền truy cập.');
       setMicStatus('idle');
-      speechDetectedRef.current = false;
-    };
+    }
+  };
 
-    recognition.onend = () => {
-      setMicStatus('idle');
-      if (!speechDetectedRef.current) {
-        setAckMessage('Did not catch any speech. Please try again closer to the mic.');
+  const sendAudioToSpeechModule = async (audioBlob) => {
+    try {
+      setLoading(true);
+      setAckMessage('📤 Đang gửi audio tới dịch vụ nhận diện giọng nói...');
+
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+      formData.append('languageCode', 'vi-VN');
+
+      const response = await api.post('/api/speech-to-text', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      const data = response.data;
+
+      if (!data.success) {
+        throw new Error(data.error || 'Speech-to-Text service error');
       }
-      recognitionRef.current = null;
-    };
 
-    recognitionRef.current = recognition;
+      const transcript = data.text || data.transcription;
+
+      if (!transcript) {
+        setAckMessage('Không nhận diện được câu lệnh. Vui lòng thử lại.');
+        setMicStatus('idle');
+        return;
+      }
+
+      // Kiểm tra nhanh xem transcript có vẻ là lệnh cho ăn không
+      const lower = transcript.toLowerCase();
+      const normalized = lower
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Sửa một số lỗi gần đúng Whisper hay tạo: "chao an", "chao anh" -> "cho an"
+      const corrected = normalized
+        .replace(/\bchao\s+an(h)?\b/g, 'cho an')
+        .replace(/\bchao\b/g, 'cho');
+
+      const isFeedLike =
+        // các cụm "cho ăn" / "cho an" và biến thể gần đúng đã được sửa
+        lower.includes('cho ăn') ||
+        corrected.includes('cho an') ||
+        // "cho 50 gram", "cho 100g", có số + đơn vị
+        /cho\s+\d+/.test(corrected) ||
+        lower.includes('gram') ||
+        /\d+\s*(g|gr|gram|kg)\b/.test(corrected) ||
+        // tiếng Anh
+        lower.includes('feed');
+
+      if (!isFeedLike) {
+        setAckMessage(`Đã nghe: "${transcript}". Đây không giống lệnh cho ăn, nên sẽ không gửi tới máy cho ăn.`);
+        setMicStatus('idle');
+        return;
+      }
+
+      setAckMessage(`Đã nghe: "${transcript}". Đang gửi lệnh cho ăn...`);
+
+      try {
+        const { data: feedData } = await FeedAPI.voice(transcript);
+        setAckMessage(feedData.message || `Đã thực hiện lệnh: "${transcript}"`);
+      } catch (err) {
+        console.error('Voice feed error:', err);
+        setAckMessage(err.response?.data?.message || 'Gửi lệnh cho ăn từ giọng nói thất bại.');
+      }
+    } catch (error) {
+      console.error('Speech module error:', error);
+      setAckMessage(`Lỗi dịch vụ nhận diện giọng nói: ${error.message}`);
+    } finally {
+      setMicStatus('idle');
+      setLoading(false);
+    }
   };
 
   return (

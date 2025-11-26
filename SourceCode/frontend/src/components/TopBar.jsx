@@ -1,5 +1,26 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth.jsx';
+
 const TopBar = () => {
-  const operatorName = localStorage.getItem('spf_operator') || 'Operator';
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const [operatorName, setOperatorName] = useState('Operator');
+
+  useEffect(() => {
+    if (user?.username) {
+      setOperatorName(user.username);
+      localStorage.setItem('spf_operator', user.username);
+    } else {
+      const fallback = localStorage.getItem('spf_operator') || 'Operator';
+      setOperatorName(fallback);
+    }
+  }, [user]);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
 
   return (
     <header className="topbar">
@@ -12,6 +33,9 @@ const TopBar = () => {
           <p className="topbar__user-label">Logged in as</p>
           <p className="topbar__user-name">{operatorName}</p>
         </div>
+        <button className="btn btn--ghost" type="button" onClick={handleLogout}>
+          Logout
+        </button>
       </div>
     </header>
   );
