@@ -150,19 +150,17 @@ class SpeechService {
 
     const lowerText = text.toLowerCase().trim();
 
-    // Chuẩn hóa bỏ dấu tiếng Việt để xử lý các lỗi nghe nhầm (ví dụ: "chào ăn" thay vì "cho ăn")
+    // Chuẩn hóa bỏ dấu tiếng Việt để xử lý so khớp không phân biệt dấu
     const normalized = lowerText
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
 
-    // Sửa một số lỗi gần đúng phổ biến mà Whisper hay tạo ra
-    // "chao an" / "chao anh" -> "cho an"
-    // "chao" đứng trước "an/anh" -> "cho"
-    let corrected = normalized
-      .replace(/\bchao\s+an(h)?\b/g, 'cho an')
-      .replace(/\bchao\b/g, 'cho');
+    // Bản gần đúng cho việc nhận diện lệnh cho ăn:
+    // cho phép sửa "chao" -> "cho" để xử lý lỗi nghe nhầm,
+    // nhưng CHỈ dùng bản này để tìm pattern cho ăn, không dùng để log.
+    const feedText = normalized.replace(/\bchao\b/g, 'cho');
     const command = {
       action: 'unknown',
       amount: null,
@@ -170,6 +168,15 @@ class SpeechService {
       rawText: text,
       confidence: 'low',
     };
+
+    // Trường hợp đặc biệt: câu rất ngắn kiểu "chào an", "chào anh"
+    // => coi là lệnh "cho ăn" với lượng mặc định
+    if (/^chao an[h\.\!\?]*$/.test(normalized)) {
+      command.action = 'feed';
+      command.amount = null;
+      command.confidence = 'medium';
+      return command;
+    }
 
     // Tìm số lượng (gram, g, kg)
     const amountPatterns = [
@@ -180,7 +187,7 @@ class SpeechService {
     ];
 
     for (const pattern of amountPatterns) {
-      const match = corrected.match(pattern);
+      const match = feedText.match(pattern);
       if (match) {
         let amount = parseInt(match[1]);
         
@@ -228,7 +235,7 @@ class SpeechService {
       'lượng thức ăn',
     ];
 
-    if (feedKeywords.some(keyword => lowerText.includes(keyword) || corrected.includes(keyword))) {
+    if (feedKeywords.some((keyword) => lowerText.includes(keyword) || feedText.includes(keyword))) {
       command.action = 'feed';
       command.confidence = 'high';
     } else if (stopKeywords.some(keyword => lowerText.includes(keyword))) {

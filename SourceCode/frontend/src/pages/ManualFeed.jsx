@@ -129,19 +129,18 @@ const ManualFeed = () => {
         .replace(/\s+/g, ' ')
         .trim();
 
-      // Sửa một số lỗi gần đúng Whisper hay tạo: "chao an", "chao anh" -> "cho an"
-      const corrected = normalized
-        .replace(/\bchao\s+an(h)?\b/g, 'cho an')
-        .replace(/\bchao\b/g, 'cho');
+      // Trường hợp đặc biệt: câu rất ngắn "chao an"/"chao anh" => coi là lệnh cho ăn
+      const isShortChaoAn = /^chao an[h\.\!\?]*$/.test(normalized);
 
       const isFeedLike =
-        // các cụm "cho ăn" / "cho an" và biến thể gần đúng đã được sửa
+        isShortChaoAn ||
+        // các cụm "cho ăn" / "cho an"
         lower.includes('cho ăn') ||
-        corrected.includes('cho an') ||
+        normalized.includes('cho an') ||
         // "cho 50 gram", "cho 100g", có số + đơn vị
-        /cho\s+\d+/.test(corrected) ||
+        /cho\s+\d+/.test(normalized) ||
         lower.includes('gram') ||
-        /\d+\s*(g|gr|gram|kg)\b/.test(corrected) ||
+        /\d+\s*(g|gr|gram|kg)\b/.test(normalized) ||
         // tiếng Anh
         lower.includes('feed');
 
