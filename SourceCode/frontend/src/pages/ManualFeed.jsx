@@ -9,6 +9,7 @@ const ManualFeed = () => {
   const [ackMessage, setAckMessage] = useState('');
   const [micStatus, setMicStatus] = useState('idle');
   const [loading, setLoading] = useState(false);
+  const [language, setLanguage] = useState('vi-VN'); // 'vi-VN' or 'en-US'
   const clientRef = useRef(null);
   const recognitionRef = useRef(null);
 
@@ -52,29 +53,65 @@ const ManualFeed = () => {
 
     try {
       const recognition = new SpeechRecognition();
-      recognition.lang = 'vi-VN';
+      recognition.lang = language;
       recognition.continuous = false;
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
         setMicStatus('listening');
-        setAckMessage('🎙️ Đang lắng nghe... Hãy nói lệnh, ví dụ: "cho ăn 200 gram"');
+        if (language === 'vi-VN') {
+          setAckMessage('🎙️ Đang lắng nghe... Nói "cho ăn" (mặc định 10g) hoặc "cho ăn 200 gram"');
+        } else {
+          setAckMessage('🎙️ Listening... Say "feed" (default 10g) or "feed 200 grams"');
+        }
       };
 
       recognition.onresult = async (event) => {
-        const transcript = event.results[0][0].transcript;
+        const transcript = event.results[0][0].transcript.trim();
         setMicStatus('processing');
         setAckMessage(`Đã nghe: "${transcript}". Đang gửi lệnh...`);
+
+        // Validate trước khi gửi (chỉ cần trigger phrase, số lượng là optional)
+        const lowerText = transcript.toLowerCase();
+        // Check for Vietnamese trigger
+        const hasViTrigger = lowerText.includes('cho ăn') || lowerText.includes('cho an');
+        // Check for English trigger
+        const hasEnTrigger = lowerText.includes('feed') || lowerText.includes('give food') || lowerText.includes('dispense');
+        const hasTrigger = hasViTrigger || hasEnTrigger;
+
+        if (!hasTrigger) {
+          if (language === 'vi-VN') {
+            setAckMessage(`⚠️ Đã nghe: "${transcript}". Không tìm thấy cụm kích hoạt. Vui lòng nói: "cho ăn" (mặc định 10g) hoặc "cho ăn 200 gram"`);
+          } else {
+            setAckMessage(`⚠️ Heard: "${transcript}". No trigger phrase found. Please say: "feed" (default 10g) or "feed 200 grams"`);
+          }
+          setMicStatus('idle');
+          return;
+        }
+        
+        // Nếu có số lượng trong transcript, hiển thị thông tin
+        const hasAmount = /\d+\s*(gram|gr|g|grams)\b/i.test(transcript);
+        if (hasAmount) {
+          // Có số lượng cụ thể, sẽ dùng số lượng đó
+        } else {
+          // Không có số lượng, sẽ dùng mặc định 10g
+          if (language === 'vi-VN') {
+            setAckMessage(`Đã nghe: "${transcript}". Không có số lượng, sẽ cho ăn 10g mặc định. Đang gửi lệnh...`);
+          } else {
+            setAckMessage(`Heard: "${transcript}". No amount specified, will feed 10g by default. Sending command...`);
+          }
+        }
 
         try {
           setLoading(true);
           const { data: feedData } = await FeedAPI.voice(transcript);
-          setAckMessage(feedData.message || `Đã thực hiện lệnh: "${transcript}"`);
+          setAckMessage(`✅ ${feedData.message || `Đã thực hiện lệnh: "${transcript}"`}`);
         } catch (err) {
           console.error('Voice feed error:', err);
-          const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Gửi lệnh thất bại';
-          setAckMessage(`❌ ${errorMsg}`);
+          const errorMsg = err.response?.data?.error || err.response?.data?.message || 'Gửi lệnh thất bại';
+          const parsedText = err.response?.data?.parsedText || transcript;
+          setAckMessage(`❌ ${errorMsg}${parsedText ? ` (Đã nghe: "${parsedText}")` : ''}`);
         } finally {
           setLoading(false);
           setMicStatus('idle');
@@ -124,14 +161,33 @@ const ManualFeed = () => {
       <section className="grid grid--2">
         <div className="card">
           <h3>Manual Feed</h3>
-          <p>Dispense a single portion immediately.</p>
+          <p>Dispense 10g immediately.</p>
           <button className="btn btn--primary btn--lg" type="button" onClick={handleFeedNow} disabled={loading}>
-            {loading ? 'Sending...' : 'Feed Now'}
+            {loading ? 'Sending...' : 'Feed Now (10g)'}
           </button>
         </div>
         <div className="card">
           <h3>Feed by Voice</h3>
-          <p>Nói lệnh như "cho ăn 200 gram"</p>
+          <p>Say "cho ăn" (10g default) or "cho ăn 200 gram" / "feed" (10g) or "feed 200 grams"</p>
+          <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <label htmlFor="language-select" style={{ fontSize: '0.9rem' }}>Language:</label>
+            <select
+              id="language-select"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              disabled={micStatus === 'listening' || micStatus === 'processing'}
+              style={{
+                padding: '0.5rem',
+                borderRadius: '0.5rem',
+                border: '1px solid #e0e7ff',
+                fontSize: '0.9rem',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="vi-VN">Tiếng Việt</option>
+              <option value="en-US">English</option>
+            </select>
+          </div>
           <button
             className={`voice-button ${micStatus === 'listening' ? 'voice-button--listening' : ''}`}
             type="button"
@@ -140,10 +196,18 @@ const ManualFeed = () => {
           >
             <span className="voice-button__dot" aria-hidden />
             <span className="voice-button__label">
-              {micStatus === 'listening' ? 'Đang nghe...' : micStatus === 'processing' ? 'Đang xử lý...' : 'Nhấn để nói'}
+              {micStatus === 'listening' 
+                ? (language === 'vi-VN' ? 'Đang nghe...' : 'Listening...')
+                : micStatus === 'processing' 
+                ? (language === 'vi-VN' ? 'Đang xử lý...' : 'Processing...')
+                : (language === 'vi-VN' ? 'Nhấn để nói' : 'Click to speak')}
             </span>
           </button>
-          <small>Trình duyệt sẽ xin quyền sử dụng microphone.</small>
+          <small>
+            {language === 'vi-VN' 
+              ? 'Trình duyệt sẽ xin quyền sử dụng microphone.'
+              : 'Browser will ask for microphone permission.'}
+          </small>
         </div>
       </section>
       {ackMessage && <p className="alert alert--info">{ackMessage}</p>}
