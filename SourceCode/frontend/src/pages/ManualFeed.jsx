@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createMqttClient } from '../services/mqtt.js';
 import { FeedAPI } from '../services/api.js';
 import Toast from '../components/Toast.jsx';
+import { useNotifications } from '../hooks/useNotifications.jsx';
+import { extractAckAmount, isScheduledAckPayload } from '../utils/notificationHelpers.js';
 
 const DEVICE_ID = import.meta.env.VITE_DEVICE_ID || 'petfeeder-feed-node-01';
 
@@ -12,30 +14,61 @@ const ManualFeed = () => {
   const [loading, setLoading] = useState(false);
   const [language, setLanguage] = useState('vi-VN'); // 'vi-VN' or 'en-US'
   const [toast, setToast] = useState(null);
-  const [lastFeedAmount, setLastFeedAmount] = useState(null);
-  const [voiceTranscript, setVoiceTranscript] = useState(null);
   const clientRef = useRef(null);
   const recognitionRef = useRef(null);
+  const languageRef = useRef(language);
+  const { addNotification } = useNotifications();
+
+  useEffect(() => {
+    languageRef.current = language;
+  }, [language]);
+
+  const handleMqttAck = useCallback(
+    (payload) => {
+      if (!payload) return;
+      const lang = languageRef.current;
+      const ackText = payload.message || JSON.stringify(payload);
+      setAckMessage((prev) => {
+        const prefix = lang === 'vi-VN' ? '📡 MQTT: ' : '📡 MQTT: ';
+        const nextLine = `${prefix}${ackText}`;
+        return prev ? `${prev}\n${nextLine}` : nextLine;
+      });
+
+      if (isScheduledAckPayload(payload)) {
+        const amount = extractAckAmount(payload, 10);
+        addNotification({
+          method: 'scheduled',
+          type: 'info',
+          amount,
+          message:
+            lang === 'vi-VN'
+              ? `Lịch cho ăn ${amount}g đã thực thi`
+              : `Scheduled feed ${amount}g executed`,
+          meta: {
+            scheduleId: payload.scheduleId || payload.schedule,
+          },
+        });
+      }
+    },
+    [addNotification],
+  );
 
   useEffect(() => {
     const client = createMqttClient({
       deviceId: DEVICE_ID,
-      onAck: (payload) => setAckMessage(payload.message || JSON.stringify(payload)),
+      onAck: handleMqttAck,
       onStatusChange: (status) => setMqttStatus(status),
     });
     clientRef.current = client;
     return () => client?.end(true);
-  }, []);
+  }, [handleMqttAck]);
 
   const handleFeedNow = async () => {
     setLoading(true);
     setAckMessage('Đang gửi lệnh cho ăn...');
-    setLastFeedAmount(null);
-    setVoiceTranscript(null); // Reset voice transcript khi dùng manual feed
     try {
       const { data } = await FeedAPI.manual();
       const amount = data.feedLog?.amount || 10;
-      setLastFeedAmount(amount);
       const message = language === 'vi-VN' 
         ? `✅ Đã cho ăn ${amount}g thành công!`
         : `✅ Successfully fed ${amount}g!`;
@@ -46,12 +79,26 @@ const ManualFeed = () => {
           : `Fed ${amount} grams`,
         type: 'success',
       });
+      addNotification({
+        method: 'manual',
+        amount,
+        type: 'success',
+        message:
+          language === 'vi-VN'
+            ? `Cho ăn thủ công ${amount}g thành công`
+            : `Manual feed ${amount}g successful`,
+      });
     } catch (err) {
       const errorMsg = err.response?.data?.message || 'Failed to send feed command';
       setAckMessage(`❌ ${errorMsg}`);
       setToast({
         message: errorMsg,
         type: 'error',
+      });
+      addNotification({
+        method: 'manual',
+        type: 'error',
+        message: errorMsg,
       });
     } finally {
       setLoading(false);
@@ -91,7 +138,6 @@ const ManualFeed = () => {
 
       recognition.onresult = async (event) => {
         const transcript = event.results[0][0].transcript.trim();
-        setVoiceTranscript(transcript); // Luôn lưu transcript để hiển thị
         setMicStatus('processing');
         
         // Validate trước khi gửi (chỉ cần trigger phrase, số lượng là optional)
@@ -149,7 +195,6 @@ const ManualFeed = () => {
           setLoading(true);
           const { data: feedData } = await FeedAPI.voice(transcript);
           const feedAmount = feedData.feedLog?.amount || feedData.parsedAmount || detectedAmount;
-          setLastFeedAmount(feedAmount);
           
           // Hiển thị kết quả với transcript và số lượng
           if (language === 'vi-VN') {
@@ -165,6 +210,16 @@ const ManualFeed = () => {
               : `Fed ${feedAmount} grams\n(Command: "${transcript}")`,
             type: 'success',
           });
+          addNotification({
+            method: 'voice',
+            amount: feedAmount,
+            transcript,
+            type: 'success',
+            message:
+              language === 'vi-VN'
+                ? `Giọng nói: cho ăn ${feedAmount}g`
+                : `Voice feed ${feedAmount}g`,
+          });
         } catch (err) {
           console.error('Voice feed error:', err);
           const errorMsg = err.response?.data?.error || err.response?.data?.message || 'Gửi lệnh thất bại';
@@ -176,6 +231,12 @@ const ManualFeed = () => {
           setToast({
             message: `${errorMsg}\n(Lệnh: "${transcript}")`,
             type: 'error',
+          });
+          addNotification({
+            method: 'voice',
+            type: 'error',
+            transcript,
+            message: errorMsg,
           });
         } finally {
           setLoading(false);
@@ -288,30 +349,6 @@ const ManualFeed = () => {
             }}
           >
             {ackMessage}
-          </div>
-        )}
-        
-        {/* Hiển thị số lượng đã cho ăn */}
-        {lastFeedAmount !== null && (
-          <div 
-            className="card"
-            style={{
-              marginTop: '1rem',
-              backgroundColor: '#f0fdf4',
-              border: '2px solid #10b981',
-            }}
-          >
-            <h3 style={{ color: '#059669', marginBottom: '0.5rem' }}>
-              {language === 'vi-VN' ? 'Lần cho ăn gần nhất' : 'Last Feed'}
-            </h3>
-            <p style={{ fontSize: '1.25rem', fontWeight: '600', color: '#047857', margin: 0 }}>
-              {lastFeedAmount}g
-            </p>
-            {voiceTranscript && (
-              <p style={{ fontSize: '0.9rem', color: '#6b7280', marginTop: '0.5rem', marginBottom: 0 }}>
-                {language === 'vi-VN' ? 'Lệnh:' : 'Command:'} "{voiceTranscript}"
-              </p>
-            )}
           </div>
         )}
       </section>

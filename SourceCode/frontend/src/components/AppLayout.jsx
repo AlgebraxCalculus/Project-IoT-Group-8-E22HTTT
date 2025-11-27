@@ -1,9 +1,11 @@
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar.jsx';
 import TopBar from './TopBar.jsx';
+import NotificationMqttBridge from './NotificationMqttBridge.jsx';
 
 const AppLayout = () => (
   <div className="app-shell">
+    <NotificationMqttBridge />
     <Sidebar />
     <div className="app-shell__main">
       <TopBar />

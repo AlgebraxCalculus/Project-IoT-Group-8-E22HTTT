@@ -40,18 +40,24 @@ export const createMqttClient = ({
   client.on('close', () => onStatusChange?.('offline'));
   client.on('error', () => onStatusChange?.('offline'));
 
-  client.on('message', (topic, payload) => {
+  client.on('message', (topic, payloadBuffer) => {
+    const payloadString = payloadBuffer.toString();
+    let data;
     try {
-      const data = JSON.parse(payload.toString());
-      if (topic.includes('/telemetry')) {
-        onTelemetry?.(data);
-      } else if (topic.includes('/ack')) {
-        onAck?.(data);
-      } else if (topic.includes('/alert')) {
-        onAlert?.(data);
-      }
+      data = JSON.parse(payloadString);
     } catch (err) {
-      console.error('Failed to parse MQTT payload', err);
+      data = {
+        raw: payloadString,
+        message: payloadString,
+      };
+    }
+
+    if (topic.includes('/telemetry')) {
+      onTelemetry?.(data, payloadString);
+    } else if (topic.includes('/ack')) {
+      onAck?.(data, payloadString);
+    } else if (topic.includes('/alert')) {
+      onAlert?.(data, payloadString);
     }
   });
 

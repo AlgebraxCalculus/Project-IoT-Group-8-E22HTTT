@@ -39,6 +39,7 @@ export const FeedAPI = {
   manual: () => api.post('/api/feed/manual'),
   voice: (voiceCommand) => api.post('/api/feed/voice', { text: voiceCommand }),
   weeklyStats: () => api.get('/api/feed/stats/weekly'),
+  history: (limit = 20) => api.get('/api/feed/history', { params: { limit } }),
 };
 
 export default api;
