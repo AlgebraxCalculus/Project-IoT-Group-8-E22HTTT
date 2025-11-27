@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createMqttClient } from '../services/mqtt.js';
-import api, { FeedAPI } from '../services/api.js';
+import { FeedAPI } from '../services/api.js';
 
 const DEVICE_ID = import.meta.env.VITE_DEVICE_ID || 'petfeeder-feed-node-01';
 
@@ -10,8 +10,7 @@ const ManualFeed = () => {
   const [micStatus, setMicStatus] = useState('idle');
   const [loading, setLoading] = useState(false);
   const clientRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  const recognitionRef = useRef(null);
 
   useEffect(() => {
     const client = createMqttClient({
@@ -37,134 +36,79 @@ const ManualFeed = () => {
   };
 
   const handleVoiceFeed = async () => {
-    // Nếu đang ghi âm thì dừng lại và gửi audio đi xử lý
-    if (micStatus === 'listening' && mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      setMicStatus('processing');
-      setAckMessage('⏳ Đang xử lý âm thanh...');
+    // Dừng listening nếu đang hoạt động
+    if (micStatus === 'listening' && recognitionRef.current) {
+      recognitionRef.current.stop();
       return;
     }
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setAckMessage('Trình duyệt không hỗ trợ ghi âm. Vui lòng dùng Chrome hoặc Edge.');
+    // Kiểm tra xem trình duyệt có hỗ trợ Web Speech API không
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      setAckMessage('Trình duyệt không hỗ trợ nhận diện giọng nói. Vui lòng dùng Chrome hoặc Edge.');
       return;
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 48000,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'vi-VN';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
 
-      let mimeType = 'audio/webm;codecs=opus';
-      if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'audio/webm';
-      }
+      recognition.onstart = () => {
+        setMicStatus('listening');
+        setAckMessage('🎙️ Đang lắng nghe... Hãy nói lệnh, ví dụ: "cho ăn 200 gram"');
+      };
 
-      const recorder = new MediaRecorder(stream, { mimeType });
-      audioChunksRef.current = [];
+      recognition.onresult = async (event) => {
+        const transcript = event.results[0][0].transcript;
+        setMicStatus('processing');
+        setAckMessage(`Đã nghe: "${transcript}". Đang gửi lệnh...`);
 
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+        try {
+          setLoading(true);
+          const { data: feedData } = await FeedAPI.voice(transcript);
+          setAckMessage(feedData.message || `Đã thực hiện lệnh: "${transcript}"`);
+        } catch (err) {
+          console.error('Voice feed error:', err);
+          const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Gửi lệnh thất bại';
+          setAckMessage(`❌ ${errorMsg}`);
+        } finally {
+          setLoading(false);
+          setMicStatus('idle');
         }
       };
 
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        await sendAudioToSpeechModule(audioBlob);
-        mediaRecorderRef.current = null;
-        audioChunksRef.current = [];
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        let errorMessage = 'Lỗi nhận diện giọng nói';
+        
+        if (event.error === 'no-speech') {
+          errorMessage = 'Không nghe thấy giọng nói. Vui lòng thử lại.';
+        } else if (event.error === 'audio-capture') {
+          errorMessage = 'Không thể truy cập microphone. Vui lòng kiểm tra quyền.';
+        } else if (event.error === 'not-allowed') {
+          errorMessage = 'Quyền truy cập microphone bị từ chối.';
+        }
+        
+        setAckMessage(errorMessage);
+        setMicStatus('idle');
       };
 
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setMicStatus('listening');
-      setAckMessage('🎙️ Đang ghi âm... hãy nói lệnh, ví dụ: "cho ăn 200 gram".');
+      recognition.onend = () => {
+        if (micStatus === 'listening') {
+          setMicStatus('idle');
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
     } catch (error) {
-      console.error('Error accessing microphone:', error);
-      setAckMessage('Không thể truy cập microphone. Vui lòng kiểm tra quyền truy cập.');
+      console.error('Error starting speech recognition:', error);
+      setAckMessage('Không thể khởi động nhận diện giọng nói.');
       setMicStatus('idle');
-    }
-  };
-
-  const sendAudioToSpeechModule = async (audioBlob) => {
-    try {
-      setLoading(true);
-      setAckMessage('📤 Đang gửi audio tới dịch vụ nhận diện giọng nói...');
-
-      const formData = new FormData();
-      formData.append('audio', audioBlob, 'recording.webm');
-      formData.append('languageCode', 'vi-VN');
-
-      const response = await api.post('/api/speech-to-text', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-
-      const data = response.data;
-
-      if (!data.success) {
-        throw new Error(data.error || 'Speech-to-Text service error');
-      }
-
-      const transcript = data.text || data.transcription;
-
-      if (!transcript) {
-        setAckMessage('Không nhận diện được câu lệnh. Vui lòng thử lại.');
-        setMicStatus('idle');
-        return;
-      }
-
-      // Kiểm tra nhanh xem transcript có vẻ là lệnh cho ăn không
-      const lower = transcript.toLowerCase();
-      const normalized = lower
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      // Trường hợp đặc biệt: câu rất ngắn "chao an"/"chao anh" => coi là lệnh cho ăn
-      const isShortChaoAn = /^chao an[h\.\!\?]*$/.test(normalized);
-
-      const isFeedLike =
-        isShortChaoAn ||
-        // các cụm "cho ăn" / "cho an"
-        lower.includes('cho ăn') ||
-        normalized.includes('cho an') ||
-        // "cho 50 gram", "cho 100g", có số + đơn vị
-        /cho\s+\d+/.test(normalized) ||
-        lower.includes('gram') ||
-        /\d+\s*(g|gr|gram|kg)\b/.test(normalized) ||
-        // tiếng Anh
-        lower.includes('feed');
-
-      if (!isFeedLike) {
-        setAckMessage(`Đã nghe: "${transcript}". Đây không giống lệnh cho ăn, nên sẽ không gửi tới máy cho ăn.`);
-        setMicStatus('idle');
-        return;
-      }
-
-      setAckMessage(`Đã nghe: "${transcript}". Đang gửi lệnh cho ăn...`);
-
-      try {
-        const { data: feedData } = await FeedAPI.voice(transcript);
-        setAckMessage(feedData.message || `Đã thực hiện lệnh: "${transcript}"`);
-      } catch (err) {
-        console.error('Voice feed error:', err);
-        setAckMessage(err.response?.data?.message || 'Gửi lệnh cho ăn từ giọng nói thất bại.');
-      }
-    } catch (error) {
-      console.error('Speech module error:', error);
-      setAckMessage(`Lỗi dịch vụ nhận diện giọng nói: ${error.message}`);
-    } finally {
-      setMicStatus('idle');
-      setLoading(false);
     }
   };
 
@@ -187,18 +131,19 @@ const ManualFeed = () => {
         </div>
         <div className="card">
           <h3>Feed by Voice</h3>
-          <p>Use your microphone and say “feed now”.</p>
+          <p>Nói lệnh như "cho ăn 200 gram"</p>
           <button
             className={`voice-button ${micStatus === 'listening' ? 'voice-button--listening' : ''}`}
             type="button"
             onClick={handleVoiceFeed}
+            disabled={loading}
           >
             <span className="voice-button__dot" aria-hidden />
             <span className="voice-button__label">
-              {micStatus === 'listening' ? 'Listening…' : 'Hold to Speak'}
+              {micStatus === 'listening' ? 'Đang nghe...' : micStatus === 'processing' ? 'Đang xử lý...' : 'Nhấn để nói'}
             </span>
           </button>
-          <small>Browser will ask for microphone permission.</small>
+          <small>Trình duyệt sẽ xin quyền sử dụng microphone.</small>
         </div>
       </section>
       {ackMessage && <p className="alert alert--info">{ackMessage}</p>}

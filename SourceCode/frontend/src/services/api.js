@@ -15,15 +15,15 @@ api.interceptors.request.use((config) => {
 });
 
 export const AuthAPI = {
-  // Frontend dùng email/password, backend nhận username/password
-  login: ({ email, password }) =>
+  // Frontend và backend đều dùng username/password
+  login: ({ username, password }) =>
     api.post('/api/auth/login', {
-      username: email,
+      username,
       password,
     }),
-  register: ({ email, password }) =>
+  register: ({ username, password }) =>
     api.post('/api/auth/register', {
-      username: email,
+      username,
       password,
     }),
 };
@@ -35,13 +35,10 @@ export const ScheduleAPI = {
   remove: (id) => api.delete(`/api/schedules/${id}`),
 };
 
-export const FeedLogAPI = {
-  list: () => api.get('/api/feed/logs'),
-};
-
 export const FeedAPI = {
   manual: () => api.post('/api/feed/manual'),
   voice: (voiceCommand) => api.post('/api/feed/voice', { text: voiceCommand }),
+  weeklyStats: () => api.get('/api/feed/stats/weekly'),
 };
 
 export default api;

@@ -1,22 +1,8 @@
-import { FeedLog } from "../models/FeedLog.js";
 import { getWeeklyFeedStats, triggerManualFeed } from "../services/feedService.js";
 
-export const getFeedLogs = async (req, res) => {
-  try {
-    const logs = await FeedLog.find({ user: req.user._id })
-      .sort({ startTime: -1 })
-      .limit(100)
-      .lean();
-    return res.json(logs);
-  } catch (error) {
-    console.error("Get feed logs error:", error.message);
-    return res.status(500).json({ message: "Failed to fetch feed logs" });
-  }
-};
-
 export const manualFeed = async (req, res) => {
-  // Default amount is 50 grams
-  const amount = 50;
+  // Default amount is 200 grams
+  const amount = 200;
 
   try {
     const feedLog = await triggerManualFeed({

@@ -8,7 +8,7 @@ import {
   YAxis,
   CartesianGrid,
 } from 'recharts';
-import { FeedLogAPI } from '../services/api.js';
+import { FeedAPI } from '../services/api.js';
 import { createMqttClient } from '../services/mqtt.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import StatCard from '../components/StatCard.jsx';
@@ -18,25 +18,26 @@ const DEVICE_ID = import.meta.env.VITE_DEVICE_ID || 'petfeeder-feed-node-01';
 const Dashboard = () => {
   const [telemetry, setTelemetry] = useState({ weight: 0 });
   const [clientStatus, setClientStatus] = useState('offline');
-  const [feedLogs, setFeedLogs] = useState([]);
-  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [weeklyStats, setWeeklyStats] = useState([]);
+  const [loadingStats, setLoadingStats] = useState(false);
   const [error, setError] = useState('');
 
-  const fetchLogs = async () => {
-    setLoadingLogs(true);
+  const fetchStats = async () => {
+    setLoadingStats(true);
     setError('');
     try {
-      const { data } = await FeedLogAPI.list();
-      setFeedLogs(data || []);
+      const { data } = await FeedAPI.weeklyStats();
+      // Backend trả về { data: [...], days: 7 }
+      setWeeklyStats(data.data || []);
     } catch (err) {
-      setError(err.response?.data?.message || 'Unable to load feed history');
+      setError(err.response?.data?.message || 'Unable to load feed statistics');
     } finally {
-      setLoadingLogs(false);
+      setLoadingStats(false);
     }
   };
 
   useEffect(() => {
-    fetchLogs();
+    fetchStats();
   }, []);
 
   useEffect(() => {
@@ -51,44 +52,17 @@ const Dashboard = () => {
   }, []);
 
   const chartData = useMemo(() => {
-    const grouped = feedLogs.reduce((acc, log) => {
-      // Only count successful feeds
-      if (log.status && log.status !== 'success') {
-        return acc;
-      }
-      
-      // Parse date correctly using local timezone
-      const dateStr = log.startTime || log.time || log.createdAt;
-      if (!dateStr) return acc;
-      
-      const dateObj = new Date(dateStr);
-      if (isNaN(dateObj.getTime())) return acc;
-      
-      // Get local date string (YYYY-MM-DD) for grouping
-      const year = dateObj.getFullYear();
-      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-      const day = String(dateObj.getDate()).padStart(2, '0');
-      const dateKey = `${year}-${month}-${day}`;
-      
-      // Format label for display
+    // Backend trả về data với format: { date: "2024-11-14", totalAmount: 350, feedCount: 2 }
+    return weeklyStats.map((stat) => {
+      const dateObj = new Date(stat.date);
       const dateLabel = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      
-      if (!acc[dateKey]) {
-        acc[dateKey] = { date: dateLabel, dateKey, weight: 0 };
-      }
-      
-      // Only sum actual amount, not targetAmount
-      const amount = Number(log.amount) || 0;
-      acc[dateKey].weight += amount;
-      
-      return acc;
-    }, {});
-    
-    // Sort by date (oldest first) and return
-    return Object.values(grouped)
-      .sort((a, b) => a.dateKey.localeCompare(b.dateKey))
-      .map(({ date, weight }) => ({ date, weight: Math.round(weight) }));
-  }, [feedLogs]);
+      return {
+        date: dateLabel,
+        weight: stat.totalAmount || 0,
+        count: stat.feedCount || 0,
+      };
+    });
+  }, [weeklyStats]);
 
   const lastFeedDisplay = telemetry.lastFeed
     ? new Date(telemetry.lastFeed).toLocaleString()
@@ -115,13 +89,13 @@ const Dashboard = () => {
 
       <section className="card">
         <div className="card__header">
-          <h3>Feeding Volume (daily)</h3>
-          <button className="btn btn--ghost" type="button" onClick={fetchLogs} disabled={loadingLogs}>
+          <h3>Feeding Volume (7 days)</h3>
+          <button className="btn btn--ghost" type="button" onClick={fetchStats} disabled={loadingStats}>
             Refresh
           </button>
         </div>
         {error && <p className="alert alert--error">{error}</p>}
-        {loadingLogs && <p className="alert alert--info">Loading chart data...</p>}
+        {loadingStats && <p className="alert alert--info">Loading chart data...</p>}
         <div style={{ width: '100%', height: 320 }}>
           {chartData.length > 0 ? (
             <ResponsiveContainer>
@@ -177,41 +151,38 @@ const Dashboard = () => {
 
       <section className="card">
         <div className="card__header">
-          <h3>Feed History</h3>
-          <p>Total entries: {feedLogs.length}</p>
+          <h3>Weekly Summary</h3>
+          <p>Last 7 days feeding statistics</p>
         </div>
         <div className="table-wrapper">
           <table>
             <thead>
               <tr>
-                <th>Start</th>
-                <th>End</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Amount</th>
-                <th>Target</th>
+                <th>Date</th>
+                <th>Total Amount</th>
+                <th>Feed Count</th>
               </tr>
             </thead>
             <tbody>
-              {[...feedLogs]
-                .sort((a, b) => {
-                  const timeA = new Date(a.startTime || a.time || a.createdAt || 0).getTime();
-                  const timeB = new Date(b.startTime || b.time || b.createdAt || 0).getTime();
-                  return timeB - timeA; // Newest first
+              {weeklyStats.length > 0 ? (
+                weeklyStats.map((stat, idx) => {
+                  const dateObj = new Date(stat.date);
+                  const dateDisplay = dateObj.toLocaleDateString('en-US', { 
+                    month: 'short', 
+                    day: 'numeric',
+                    year: 'numeric'
+                  });
+                  return (
+                    <tr key={stat.date || idx}>
+                      <td>{dateDisplay}</td>
+                      <td>{stat.totalAmount || 0} g</td>
+                      <td>{stat.feedCount || 0} times</td>
+                    </tr>
+                  );
                 })
-                .map((log) => (
-                  <tr key={log.id || log._id || log.startTime}>
-                    <td>{log.startTime ? new Date(log.startTime).toLocaleString() : '—'}</td>
-                    <td>{log.endTime ? new Date(log.endTime).toLocaleString() : '—'}</td>
-                    <td>{log.feedType || 'manual'}</td>
-                    <td>{log.status || 'success'}</td>
-                    <td>{log.amount ?? 0} g</td>
-                    <td>{log.targetAmount ?? '—'}</td>
-                  </tr>
-                ))}
-              {!feedLogs.length && (
+              ) : (
                 <tr>
-                  <td colSpan={6}>No records yet</td>
+                  <td colSpan={3}>No data available</td>
                 </tr>
               )}
             </tbody>
