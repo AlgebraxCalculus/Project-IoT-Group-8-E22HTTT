@@ -161,14 +161,14 @@ const ManualFeed = () => {
       <section className="grid grid--2">
         <div className="card">
           <h3>Manual Feed</h3>
-          <p>Dispense 10g immediately.</p>
+          <p>Dispense food</p>
           <button className="btn btn--primary btn--lg" type="button" onClick={handleFeedNow} disabled={loading}>
-            {loading ? 'Sending...' : 'Feed Now (10g)'}
+            {loading ? 'Sending...' : 'Feed Now'}
           </button>
         </div>
         <div className="card">
           <h3>Feed by Voice</h3>
-          <p>Say "cho ăn" (10g default) or "cho ăn 200 gram" / "feed" (10g) or "feed 200 grams"</p>
+          <p>Say "cho ăn" or "cho ăn 200 gram", "feed" or "feed 200 grams"</p>
           <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <label htmlFor="language-select" style={{ fontSize: '0.9rem' }}>Language:</label>
             <select
