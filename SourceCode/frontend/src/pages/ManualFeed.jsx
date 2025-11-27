@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createMqttClient } from '../services/mqtt.js';
 import { FeedAPI } from '../services/api.js';
+import Toast from '../components/Toast.jsx';
 
 const DEVICE_ID = import.meta.env.VITE_DEVICE_ID || 'petfeeder-feed-node-01';
 
@@ -10,6 +11,9 @@ const ManualFeed = () => {
   const [micStatus, setMicStatus] = useState('idle');
   const [loading, setLoading] = useState(false);
   const [language, setLanguage] = useState('vi-VN'); // 'vi-VN' or 'en-US'
+  const [toast, setToast] = useState(null);
+  const [lastFeedAmount, setLastFeedAmount] = useState(null);
+  const [voiceTranscript, setVoiceTranscript] = useState(null);
   const clientRef = useRef(null);
   const recognitionRef = useRef(null);
 
@@ -25,12 +29,30 @@ const ManualFeed = () => {
 
   const handleFeedNow = async () => {
     setLoading(true);
-    setAckMessage('Sending feed command...');
+    setAckMessage('Đang gửi lệnh cho ăn...');
+    setLastFeedAmount(null);
+    setVoiceTranscript(null); // Reset voice transcript khi dùng manual feed
     try {
       const { data } = await FeedAPI.manual();
-      setAckMessage(data.message || 'Feed command sent successfully!');
+      const amount = data.feedLog?.amount || 10;
+      setLastFeedAmount(amount);
+      const message = language === 'vi-VN' 
+        ? `✅ Đã cho ăn ${amount}g thành công!`
+        : `✅ Successfully fed ${amount}g!`;
+      setAckMessage(message);
+      setToast({
+        message: language === 'vi-VN' 
+          ? `Đã cho ăn ${amount} gram`
+          : `Fed ${amount} grams`,
+        type: 'success',
+      });
     } catch (err) {
-      setAckMessage(err.response?.data?.message || 'Failed to send feed command');
+      const errorMsg = err.response?.data?.message || 'Failed to send feed command';
+      setAckMessage(`❌ ${errorMsg}`);
+      setToast({
+        message: errorMsg,
+        type: 'error',
+      });
     } finally {
       setLoading(false);
     }
@@ -69,9 +91,9 @@ const ManualFeed = () => {
 
       recognition.onresult = async (event) => {
         const transcript = event.results[0][0].transcript.trim();
+        setVoiceTranscript(transcript); // Luôn lưu transcript để hiển thị
         setMicStatus('processing');
-        setAckMessage(`Đã nghe: "${transcript}". Đang gửi lệnh...`);
-
+        
         // Validate trước khi gửi (chỉ cần trigger phrase, số lượng là optional)
         const lowerText = transcript.toLowerCase();
         // Check for Vietnamese trigger
@@ -80,38 +102,81 @@ const ManualFeed = () => {
         const hasEnTrigger = lowerText.includes('feed') || lowerText.includes('give food') || lowerText.includes('dispense');
         const hasTrigger = hasViTrigger || hasEnTrigger;
 
+        // LUÔN hiển thị transcript đã nhận diện được
+        if (language === 'vi-VN') {
+          setAckMessage(`🎙️ Đã nghe: "${transcript}"`);
+        } else {
+          setAckMessage(`🎙️ Heard: "${transcript}"`);
+        }
+
         if (!hasTrigger) {
           if (language === 'vi-VN') {
-            setAckMessage(`⚠️ Đã nghe: "${transcript}". Không tìm thấy cụm kích hoạt. Vui lòng nói: "cho ăn" (mặc định 10g) hoặc "cho ăn 200 gram"`);
+            setAckMessage(`🎙️ Đã nghe: "${transcript}"\n⚠️ Không tìm thấy cụm kích hoạt. Vui lòng nói: "cho ăn" (mặc định 10g) hoặc "cho ăn 200 gram"`);
           } else {
-            setAckMessage(`⚠️ Heard: "${transcript}". No trigger phrase found. Please say: "feed" (default 10g) or "feed 200 grams"`);
+            setAckMessage(`🎙️ Heard: "${transcript}"\n⚠️ No trigger phrase found. Please say: "feed" (default 10g) or "feed 200 grams"`);
           }
+          setToast({
+            message: language === 'vi-VN' 
+              ? `Không tìm thấy lệnh trong: "${transcript}"`
+              : `No command found in: "${transcript}"`,
+            type: 'warning',
+          });
           setMicStatus('idle');
           return;
         }
         
-        // Nếu có số lượng trong transcript, hiển thị thông tin
-        const hasAmount = /\d+\s*(gram|gr|g|grams)\b/i.test(transcript);
+        // Kiểm tra số lượng
+        const amountMatch = transcript.match(/(\d+)\s*(gram|gr|g|grams)\b/i);
+        const hasAmount = !!amountMatch;
+        const detectedAmount = amountMatch ? parseInt(amountMatch[1], 10) : 10;
+        
+        // Hiển thị thông tin về số lượng
         if (hasAmount) {
-          // Có số lượng cụ thể, sẽ dùng số lượng đó
-        } else {
-          // Không có số lượng, sẽ dùng mặc định 10g
           if (language === 'vi-VN') {
-            setAckMessage(`Đã nghe: "${transcript}". Không có số lượng, sẽ cho ăn 10g mặc định. Đang gửi lệnh...`);
+            setAckMessage(`🎙️ Đã nghe: "${transcript}"\n📊 Nhận diện: ${detectedAmount}g\n⏳ Đang gửi lệnh...`);
           } else {
-            setAckMessage(`Heard: "${transcript}". No amount specified, will feed 10g by default. Sending command...`);
+            setAckMessage(`🎙️ Heard: "${transcript}"\n📊 Detected: ${detectedAmount}g\n⏳ Sending command...`);
+          }
+        } else {
+          if (language === 'vi-VN') {
+            setAckMessage(`🎙️ Đã nghe: "${transcript}"\n📊 Không có số lượng, dùng mặc định: 10g\n⏳ Đang gửi lệnh...`);
+          } else {
+            setAckMessage(`🎙️ Heard: "${transcript}"\n📊 No amount, using default: 10g\n⏳ Sending command...`);
           }
         }
 
         try {
           setLoading(true);
           const { data: feedData } = await FeedAPI.voice(transcript);
-          setAckMessage(`✅ ${feedData.message || `Đã thực hiện lệnh: "${transcript}"`}`);
+          const feedAmount = feedData.feedLog?.amount || feedData.parsedAmount || detectedAmount;
+          setLastFeedAmount(feedAmount);
+          
+          // Hiển thị kết quả với transcript và số lượng
+          if (language === 'vi-VN') {
+            setAckMessage(`🎙️ Đã nghe: "${transcript}"\n✅ Đã cho ăn ${feedAmount}g thành công!`);
+          } else {
+            setAckMessage(`🎙️ Heard: "${transcript}"\n✅ Successfully fed ${feedAmount}g!`);
+          }
+          
+          // Popup notification
+          setToast({
+            message: language === 'vi-VN' 
+              ? `Đã cho ăn ${feedAmount} gram\n(Lệnh: "${transcript}")`
+              : `Fed ${feedAmount} grams\n(Command: "${transcript}")`,
+            type: 'success',
+          });
         } catch (err) {
           console.error('Voice feed error:', err);
           const errorMsg = err.response?.data?.error || err.response?.data?.message || 'Gửi lệnh thất bại';
-          const parsedText = err.response?.data?.parsedText || transcript;
-          setAckMessage(`❌ ${errorMsg}${parsedText ? ` (Đã nghe: "${parsedText}")` : ''}`);
+          if (language === 'vi-VN') {
+            setAckMessage(`🎙️ Đã nghe: "${transcript}"\n❌ ${errorMsg}`);
+          } else {
+            setAckMessage(`🎙️ Heard: "${transcript}"\n❌ ${errorMsg}`);
+          }
+          setToast({
+            message: `${errorMsg}\n(Lệnh: "${transcript}")`,
+            type: 'error',
+          });
         } finally {
           setLoading(false);
           setMicStatus('idle');
@@ -210,7 +275,56 @@ const ManualFeed = () => {
           </small>
         </div>
       </section>
-      {ackMessage && <p className="alert alert--info">{ackMessage}</p>}
+      
+      {/* Hiển thị thông tin chi tiết */}
+      <section style={{ marginTop: '2rem' }}>
+        {ackMessage && (
+          <div 
+            className="alert alert--info" 
+            style={{ 
+              whiteSpace: 'pre-line',
+              lineHeight: '1.6',
+              fontSize: '0.95rem',
+            }}
+          >
+            {ackMessage}
+          </div>
+        )}
+        
+        {/* Hiển thị số lượng đã cho ăn */}
+        {lastFeedAmount !== null && (
+          <div 
+            className="card"
+            style={{
+              marginTop: '1rem',
+              backgroundColor: '#f0fdf4',
+              border: '2px solid #10b981',
+            }}
+          >
+            <h3 style={{ color: '#059669', marginBottom: '0.5rem' }}>
+              {language === 'vi-VN' ? 'Lần cho ăn gần nhất' : 'Last Feed'}
+            </h3>
+            <p style={{ fontSize: '1.25rem', fontWeight: '600', color: '#047857', margin: 0 }}>
+              {lastFeedAmount}g
+            </p>
+            {voiceTranscript && (
+              <p style={{ fontSize: '0.9rem', color: '#6b7280', marginTop: '0.5rem', marginBottom: 0 }}>
+                {language === 'vi-VN' ? 'Lệnh:' : 'Command:'} "{voiceTranscript}"
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+      
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+          duration={5000}
+        />
+      )}
     </div>
   );
 };
