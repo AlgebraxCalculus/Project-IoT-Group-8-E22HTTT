@@ -22,22 +22,14 @@ const NotificationMqttBridge = () => {
   useEffect(() => {
     clientRef.current = createMqttClient({
       onAck: (payload) => {
-        if (!isScheduledAckPayload(payload)) return;
-        const lang = localeRef.current;
-        const amount = extractAckAmount(payload, 10);
-        addNotification({
-          method: 'scheduled',
-          amount,
-          type: 'info',
-          message:
-            lang === 'vi-VN'
-              ? `Lịch cho ăn ${amount}g đã được thực thi`
-              : `Scheduled feed ${amount}g executed`,
-          meta: {
-            scheduleId: payload.scheduleId || payload.schedule || payload.meta?.scheduleId,
-            issuedAt: payload.issuedAt,
-          },
-        });
+        // Skip scheduled feeds - they're handled by polling in useNotifications
+        // Only handle manual/voice feeds from MQTT
+        if (isScheduledAckPayload(payload)) {
+          // Scheduled feeds are handled by polling feed history
+          // This prevents duplicate notifications
+          return;
+        }
+        // Manual/voice feeds can still be handled here if needed
       },
     });
 

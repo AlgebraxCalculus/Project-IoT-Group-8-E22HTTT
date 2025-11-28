@@ -39,6 +39,32 @@ export const NotificationProvider = ({ children }) => {
 
   const addNotification = useCallback((notification) => {
     setNotifications((prev) => {
+      // Deduplication: Check if similar notification already exists
+      // For scheduled feeds, check if same method + amount + within 2 minutes
+      if (notification.method === 'scheduled') {
+        const now = new Date(notification.createdAt || new Date().toISOString()).getTime();
+        const duplicate = prev.find((n) => {
+          if (n.method !== 'scheduled') return false;
+          if (n.amount !== notification.amount) return false;
+          const nTime = new Date(n.createdAt).getTime();
+          // Same scheduled feed if within 2 minutes
+          return Math.abs(now - nTime) < 120000; // 2 minutes in ms
+        });
+        
+        if (duplicate) {
+          // Update existing notification instead of creating duplicate
+          return prev.map((n) =>
+            n.id === duplicate.id
+              ? {
+                  ...n,
+                  message: notification.message || n.message,
+                  meta: { ...n.meta, ...notification.meta },
+                }
+              : n
+          );
+        }
+      }
+
       const next = [
         {
           id: notification.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
