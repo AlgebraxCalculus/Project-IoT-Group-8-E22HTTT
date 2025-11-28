@@ -1,5 +1,11 @@
-const FEED_TRIGGER_REGEX = /cho\s*ăn/i;
-const AMOUNT_REGEX = /(\d+)\s*(gram|gr|g)\b/i;
+// Vietnamese trigger phrases: "cho ăn", "cho an"
+const VI_FEED_TRIGGER_REGEX = /cho\s*ăn|cho\s*an/i;
+// English trigger phrases: "feed", "give food", "dispense"
+const EN_FEED_TRIGGER_REGEX = /feed|give\s+food|dispense/i;
+
+// Amount regex - supports both Vietnamese and English
+// Matches: "200 gram", "200 grams", "200 gr", "200 g"
+const AMOUNT_REGEX = /(\d+)\s*(gram|gr|g|grams)\b/i;
 
 /**
  * Parse voice command text to extract feeding instruction
@@ -13,43 +19,43 @@ export const parseVoiceCommand = (text = "") => {
 
   const normalized = text.trim().toLowerCase();
   
-  // Check for feed trigger phrase
-  const hasTrigger = FEED_TRIGGER_REGEX.test(normalized);
+  // Check for feed trigger phrase (Vietnamese or English)
+  const hasViTrigger = VI_FEED_TRIGGER_REGEX.test(normalized);
+  const hasEnTrigger = EN_FEED_TRIGGER_REGEX.test(normalized);
+  const hasTrigger = hasViTrigger || hasEnTrigger;
+  
   if (!hasTrigger) {
     return { 
       shouldFeed: false, 
       amount: null, 
-      error: "Không tìm thấy cụm từ 'cho ăn' trong lệnh" 
+      error: "Không tìm thấy cụm từ kích hoạt trong lệnh. Tiếng Việt: 'cho ăn', Tiếng Anh: 'feed' (ví dụ: 'cho ăn 200 gram' hoặc 'feed 200 grams')" 
     };
   }
 
-  // Extract amount
+  // Extract amount (supports both Vietnamese and English)
+  // If no amount specified, default to 10 grams
+  const DEFAULT_AMOUNT = 10;
   const amountMatch = normalized.match(AMOUNT_REGEX);
-  if (!amountMatch) {
-    return { 
-      shouldFeed: false, 
-      amount: null, 
-      error: "Không tìm thấy số lượng gram trong lệnh (ví dụ: 200 gram)" 
-    };
+  
+  let amount = DEFAULT_AMOUNT; // Default amount if not specified
+  
+  if (amountMatch) {
+    amount = Number(amountMatch[1]);
+    if (Number.isNaN(amount) || amount <= 0) {
+      // If invalid amount, use default
+      amount = DEFAULT_AMOUNT;
+    } else {
+      // Validate amount range
+      if (amount < 5 || amount > 1000) {
+        return { 
+          shouldFeed: false, 
+          amount: null, 
+          error: "Số lượng phải từ 5 đến 1000 gram" 
+        };
+      }
+    }
   }
-
-  const amount = Number(amountMatch[1]);
-  if (Number.isNaN(amount) || amount <= 0) {
-    return { 
-      shouldFeed: false, 
-      amount: null, 
-      error: "Số lượng gram không hợp lệ" 
-    };
-  }
-
-  // Validate amount range
-  if (amount < 5 || amount > 1000) {
-    return { 
-      shouldFeed: false, 
-      amount: null, 
-      error: "Số lượng phải từ 5 đến 1000 gram" 
-    };
-  }
+  // If no amount found, use default (10g)
 
   return { shouldFeed: true, amount, error: null };
 };

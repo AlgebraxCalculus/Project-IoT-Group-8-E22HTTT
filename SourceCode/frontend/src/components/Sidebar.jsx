@@ -12,7 +12,6 @@ const Sidebar = () => (
       <div className="sidebar__logo">SPF</div>
       <div>
         <p className="sidebar__title">Smart Pet Feeder</p>
-        <p className="sidebar__subtitle">Blynk-inspired UI</p>
       </div>
     </div>
     <nav className="sidebar__nav">

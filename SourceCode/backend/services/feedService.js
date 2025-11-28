@@ -7,25 +7,33 @@ export const triggerManualFeed = async ({ userId, amount }) => {
   const feedLog = new FeedLog({
     user: userId,
     feedType: "manual",
-    amount,
+    amount: 0, // will be updated from ACK
     targetAmount: amount,
     startTime: new Date(),
   });
 
+  // prepare payload and ensure issuedAt present for correlation
+  const payload = {
+    mode: "manual",
+    amount,
+    userId,
+    issuedAt: Date.now(),
+  };
+
   try {
-    await publishFeedCommand({
-      mode: "manual",
-      amount,
-      userId,
-      issuedAt: Date.now(),
-    });
+    // publish and wait for device ACK (will resolve with parsed ACK JSON from device)
+    const ack = await publishFeedCommand(payload);
 
-    feedLog.status = "success";
+    // ack expected shape: { device_id, timestamp, type: "feeding_complete", mode, amount, targetAmount, status, userId, issuedAt }
+    feedLog.amount = ack.amount ?? 0;
+    feedLog.targetAmount = ack.targetAmount ?? amount;
+    feedLog.status = (ack.status === "success") ? "success" : "failed";
     feedLog.endTime = new Date();
-    await feedLog.save();
 
+    await feedLog.save();
     return feedLog;
   } catch (error) {
+    // publish failed or ACK timeout
     feedLog.status = "failed";
     feedLog.endTime = new Date();
     await feedLog.save();
@@ -37,25 +45,29 @@ export const triggerScheduledFeed = async ({ userId, amount, scheduleId }) => {
   const feedLog = new FeedLog({
     user: userId,
     feedType: "scheduled",
-    amount,
+    amount: 0,
     targetAmount: amount,
     schedule: scheduleId,
     startTime: new Date(),
   });
 
+  const payload = {
+    mode: "scheduled",
+    amount,
+    userId,
+    scheduleId,
+    issuedAt: Date.now(),
+  };
+
   try {
-    await publishFeedCommand({
-      mode: "scheduled",
-      amount,
-      userId,
-      scheduleId,
-      issuedAt: Date.now(),
-    });
+    const ack = await publishFeedCommand(payload);
 
-    feedLog.status = "success";
+    feedLog.amount = ack.amount ?? 0;
+    feedLog.targetAmount = ack.targetAmount ?? amount;
+    feedLog.status = (ack.status === "success") ? "success" : "failed";
     feedLog.endTime = new Date();
-    await feedLog.save();
 
+    await feedLog.save();
     return feedLog;
   } catch (error) {
     feedLog.status = "failed";
@@ -69,25 +81,29 @@ export const triggerVoiceFeed = async ({ userId, amount, voiceCommand }) => {
   const feedLog = new FeedLog({
     user: userId,
     feedType: "voice",
-    amount,
+    amount: 0,
     targetAmount: amount,
     voiceCommand,
     startTime: new Date(),
   });
 
+  const payload = {
+    mode: "voice",
+    amount,
+    userId,
+    voiceCommand,
+    issuedAt: Date.now(),
+  };
+
   try {
-    await publishFeedCommand({
-      mode: "voice",
-      amount,
-      userId,
-      voiceCommand,
-      issuedAt: Date.now(),
-    });
+    const ack = await publishFeedCommand(payload);
 
-    feedLog.status = "success";
+    feedLog.amount = ack.amount ?? 0;
+    feedLog.targetAmount = ack.targetAmount ?? amount;
+    feedLog.status = (ack.status === "success") ? "success" : "failed";
     feedLog.endTime = new Date();
-    await feedLog.save();
 
+    await feedLog.save();
     return feedLog;
   } catch (error) {
     feedLog.status = "failed";

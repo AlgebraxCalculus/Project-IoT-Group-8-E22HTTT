@@ -10,8 +10,8 @@ const usernameValidator = body("username")
   .withMessage("Username must be at least 3 characters");
 
 const passwordValidator = body("password")
-  .isLength({ min: 1 })
-  .withMessage("Password is required");
+  .isLength({ min: 6 })
+  .withMessage("Password must be at least 6 characters");
 
 router.post("/register", [usernameValidator, passwordValidator], register);
 router.post("/login", [usernameValidator, passwordValidator], login);

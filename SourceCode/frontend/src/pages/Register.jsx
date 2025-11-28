@@ -4,7 +4,7 @@ import { AuthAPI } from '../services/api.js';
 
 const Register = () => {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [form, setForm] = useState({ username: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -43,25 +43,16 @@ const Register = () => {
         <p className="auth-card__subtitle">Access Smart Pet Feeder dashboard</p>
         {error && <p className="alert alert--error">{error}</p>}
         {success && <p className="alert alert--success">{success}</p>}
-        <label htmlFor="name">Full Name</label>
+        <label htmlFor="username">Username</label>
         <input
-          id="name"
-          name="name"
+          id="username"
+          name="username"
           type="text"
-          placeholder="Nguyen Van A"
-          value={form.name}
+          placeholder="your_username"
+          value={form.username}
           onChange={handleChange}
           required
-        />
-        <label htmlFor="email">Email</label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          placeholder="you@example.com"
-          value={form.email}
-          onChange={handleChange}
-          required
+          minLength={3}
         />
         <label htmlFor="password">Password</label>
         <input
@@ -72,6 +63,7 @@ const Register = () => {
           value={form.password}
           onChange={handleChange}
           required
+          minLength={6}
         />
         <button className="btn btn--primary" type="submit" disabled={loading}>
           {loading ? 'Creating account...' : 'Register'}

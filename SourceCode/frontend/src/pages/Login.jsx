@@ -7,7 +7,7 @@ const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { login, isAuthenticated } = useAuth();
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({ username: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -50,15 +50,16 @@ const Login = () => {
         <h2>Smart Pet Feeder</h2>
         <p className="auth-card__subtitle">Login to manage your feeder</p>
         {error && <p className="alert alert--error">{error}</p>}
-        <label htmlFor="email">Email</label>
+        <label htmlFor="username">Username</label>
         <input
-          id="email"
-          name="email"
-          type="email"
-          placeholder="you@example.com"
-          value={form.email}
+          id="username"
+          name="username"
+          type="text"
+          placeholder="your_username"
+          value={form.username}
           onChange={handleChange}
           required
+          minLength={3}
         />
         <label htmlFor="password">Password</label>
         <input
@@ -69,6 +70,7 @@ const Login = () => {
           value={form.password}
           onChange={handleChange}
           required
+          minLength={6}
         />
         <button className="btn btn--primary" type="submit" disabled={loading}>
           {loading ? 'Signing in...' : 'Login'}

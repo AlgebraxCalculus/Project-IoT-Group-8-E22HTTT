@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createMqttClient } from '../services/mqtt.js';
-import api, { FeedAPI } from '../services/api.js';
+import { FeedAPI } from '../services/api.js';
+import Toast from '../components/Toast.jsx';
 
 const DEVICE_ID = import.meta.env.VITE_DEVICE_ID || 'petfeeder-feed-node-01';
 
@@ -9,9 +10,12 @@ const ManualFeed = () => {
   const [ackMessage, setAckMessage] = useState('');
   const [micStatus, setMicStatus] = useState('idle');
   const [loading, setLoading] = useState(false);
+  const [language, setLanguage] = useState('vi-VN'); // 'vi-VN' or 'en-US'
+  const [toast, setToast] = useState(null);
+  const [lastFeedAmount, setLastFeedAmount] = useState(null);
+  const [voiceTranscript, setVoiceTranscript] = useState(null);
   const clientRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  const recognitionRef = useRef(null);
 
   useEffect(() => {
     const client = createMqttClient({
@@ -25,146 +29,188 @@ const ManualFeed = () => {
 
   const handleFeedNow = async () => {
     setLoading(true);
-    setAckMessage('Sending feed command...');
+    setAckMessage('Đang gửi lệnh cho ăn...');
+    setLastFeedAmount(null);
+    setVoiceTranscript(null); // Reset voice transcript khi dùng manual feed
     try {
       const { data } = await FeedAPI.manual();
-      setAckMessage(data.message || 'Feed command sent successfully!');
+      const amount = data.feedLog?.amount || 10;
+      setLastFeedAmount(amount);
+      const message = language === 'vi-VN' 
+        ? `✅ Đã cho ăn ${amount}g thành công!`
+        : `✅ Successfully fed ${amount}g!`;
+      setAckMessage(message);
+      setToast({
+        message: language === 'vi-VN' 
+          ? `Đã cho ăn ${amount} gram`
+          : `Fed ${amount} grams`,
+        type: 'success',
+      });
     } catch (err) {
-      setAckMessage(err.response?.data?.message || 'Failed to send feed command');
+      const errorMsg = err.response?.data?.message || 'Failed to send feed command';
+      setAckMessage(`❌ ${errorMsg}`);
+      setToast({
+        message: errorMsg,
+        type: 'error',
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleVoiceFeed = async () => {
-    // Nếu đang ghi âm thì dừng lại và gửi audio đi xử lý
-    if (micStatus === 'listening' && mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      setMicStatus('processing');
-      setAckMessage('⏳ Đang xử lý âm thanh...');
+    // Dừng listening nếu đang hoạt động
+    if (micStatus === 'listening' && recognitionRef.current) {
+      recognitionRef.current.stop();
       return;
     }
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setAckMessage('Trình duyệt không hỗ trợ ghi âm. Vui lòng dùng Chrome hoặc Edge.');
+    // Kiểm tra xem trình duyệt có hỗ trợ Web Speech API không
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      setAckMessage('Trình duyệt không hỗ trợ nhận diện giọng nói. Vui lòng dùng Chrome hoặc Edge.');
       return;
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 48000,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const recognition = new SpeechRecognition();
+      recognition.lang = language;
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
 
-      let mimeType = 'audio/webm;codecs=opus';
-      if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'audio/webm';
-      }
-
-      const recorder = new MediaRecorder(stream, { mimeType });
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+      recognition.onstart = () => {
+        setMicStatus('listening');
+        if (language === 'vi-VN') {
+          setAckMessage('🎙️ Đang lắng nghe... Nói "cho ăn" (mặc định 10g) hoặc "cho ăn 200 gram"');
+        } else {
+          setAckMessage('🎙️ Listening... Say "feed" (default 10g) or "feed 200 grams"');
         }
       };
 
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        await sendAudioToSpeechModule(audioBlob);
-        mediaRecorderRef.current = null;
-        audioChunksRef.current = [];
+      recognition.onresult = async (event) => {
+        const transcript = event.results[0][0].transcript.trim();
+        setVoiceTranscript(transcript); // Luôn lưu transcript để hiển thị
+        setMicStatus('processing');
+        
+        // Validate trước khi gửi (chỉ cần trigger phrase, số lượng là optional)
+        const lowerText = transcript.toLowerCase();
+        // Check for Vietnamese trigger
+        const hasViTrigger = lowerText.includes('cho ăn') || lowerText.includes('cho an');
+        // Check for English trigger
+        const hasEnTrigger = lowerText.includes('feed') || lowerText.includes('give food') || lowerText.includes('dispense');
+        const hasTrigger = hasViTrigger || hasEnTrigger;
+
+        // LUÔN hiển thị transcript đã nhận diện được
+        if (language === 'vi-VN') {
+          setAckMessage(`🎙️ Đã nghe: "${transcript}"`);
+        } else {
+          setAckMessage(`🎙️ Heard: "${transcript}"`);
+        }
+
+        if (!hasTrigger) {
+          if (language === 'vi-VN') {
+            setAckMessage(`🎙️ Đã nghe: "${transcript}"\n⚠️ Không tìm thấy cụm kích hoạt. Vui lòng nói: "cho ăn" (mặc định 10g) hoặc "cho ăn 200 gram"`);
+          } else {
+            setAckMessage(`🎙️ Heard: "${transcript}"\n⚠️ No trigger phrase found. Please say: "feed" (default 10g) or "feed 200 grams"`);
+          }
+          setToast({
+            message: language === 'vi-VN' 
+              ? `Không tìm thấy lệnh trong: "${transcript}"`
+              : `No command found in: "${transcript}"`,
+            type: 'warning',
+          });
+          setMicStatus('idle');
+          return;
+        }
+        
+        // Kiểm tra số lượng
+        const amountMatch = transcript.match(/(\d+)\s*(gram|gr|g|grams)\b/i);
+        const hasAmount = !!amountMatch;
+        const detectedAmount = amountMatch ? parseInt(amountMatch[1], 10) : 10;
+        
+        // Hiển thị thông tin về số lượng
+        if (hasAmount) {
+          if (language === 'vi-VN') {
+            setAckMessage(`🎙️ Đã nghe: "${transcript}"\n📊 Nhận diện: ${detectedAmount}g\n⏳ Đang gửi lệnh...`);
+          } else {
+            setAckMessage(`🎙️ Heard: "${transcript}"\n📊 Detected: ${detectedAmount}g\n⏳ Sending command...`);
+          }
+        } else {
+          if (language === 'vi-VN') {
+            setAckMessage(`🎙️ Đã nghe: "${transcript}"\n📊 Không có số lượng, dùng mặc định: 10g\n⏳ Đang gửi lệnh...`);
+          } else {
+            setAckMessage(`🎙️ Heard: "${transcript}"\n📊 No amount, using default: 10g\n⏳ Sending command...`);
+          }
+        }
+
+        try {
+          setLoading(true);
+          const { data: feedData } = await FeedAPI.voice(transcript);
+          const feedAmount = feedData.feedLog?.amount || feedData.parsedAmount || detectedAmount;
+          setLastFeedAmount(feedAmount);
+          
+          // Hiển thị kết quả với transcript và số lượng
+          if (language === 'vi-VN') {
+            setAckMessage(`🎙️ Đã nghe: "${transcript}"\n✅ Đã cho ăn ${feedAmount}g thành công!`);
+          } else {
+            setAckMessage(`🎙️ Heard: "${transcript}"\n✅ Successfully fed ${feedAmount}g!`);
+          }
+          
+          // Popup notification
+          setToast({
+            message: language === 'vi-VN' 
+              ? `Đã cho ăn ${feedAmount} gram\n(Lệnh: "${transcript}")`
+              : `Fed ${feedAmount} grams\n(Command: "${transcript}")`,
+            type: 'success',
+          });
+        } catch (err) {
+          console.error('Voice feed error:', err);
+          const errorMsg = err.response?.data?.error || err.response?.data?.message || 'Gửi lệnh thất bại';
+          if (language === 'vi-VN') {
+            setAckMessage(`🎙️ Đã nghe: "${transcript}"\n❌ ${errorMsg}`);
+          } else {
+            setAckMessage(`🎙️ Heard: "${transcript}"\n❌ ${errorMsg}`);
+          }
+          setToast({
+            message: `${errorMsg}\n(Lệnh: "${transcript}")`,
+            type: 'error',
+          });
+        } finally {
+          setLoading(false);
+          setMicStatus('idle');
+        }
       };
 
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setMicStatus('listening');
-      setAckMessage('🎙️ Đang ghi âm... hãy nói lệnh, ví dụ: "cho ăn 200 gram".');
-    } catch (error) {
-      console.error('Error accessing microphone:', error);
-      setAckMessage('Không thể truy cập microphone. Vui lòng kiểm tra quyền truy cập.');
-      setMicStatus('idle');
-    }
-  };
-
-  const sendAudioToSpeechModule = async (audioBlob) => {
-    try {
-      setLoading(true);
-      setAckMessage('📤 Đang gửi audio tới dịch vụ nhận diện giọng nói...');
-
-      const formData = new FormData();
-      formData.append('audio', audioBlob, 'recording.webm');
-      formData.append('languageCode', 'vi-VN');
-
-      const response = await api.post('/api/speech-to-text', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-
-      const data = response.data;
-
-      if (!data.success) {
-        throw new Error(data.error || 'Speech-to-Text service error');
-      }
-
-      const transcript = data.text || data.transcription;
-
-      if (!transcript) {
-        setAckMessage('Không nhận diện được câu lệnh. Vui lòng thử lại.');
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        let errorMessage = 'Lỗi nhận diện giọng nói';
+        
+        if (event.error === 'no-speech') {
+          errorMessage = 'Không nghe thấy giọng nói. Vui lòng thử lại.';
+        } else if (event.error === 'audio-capture') {
+          errorMessage = 'Không thể truy cập microphone. Vui lòng kiểm tra quyền.';
+        } else if (event.error === 'not-allowed') {
+          errorMessage = 'Quyền truy cập microphone bị từ chối.';
+        }
+        
+        setAckMessage(errorMessage);
         setMicStatus('idle');
-        return;
-      }
+      };
 
-      // Kiểm tra nhanh xem transcript có vẻ là lệnh cho ăn không
-      const lower = transcript.toLowerCase();
-      const normalized = lower
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+      recognition.onend = () => {
+        if (micStatus === 'listening') {
+          setMicStatus('idle');
+        }
+      };
 
-      // Trường hợp đặc biệt: câu rất ngắn "chao an"/"chao anh" => coi là lệnh cho ăn
-      const isShortChaoAn = /^chao an[h\.\!\?]*$/.test(normalized);
-
-      const isFeedLike =
-        isShortChaoAn ||
-        // các cụm "cho ăn" / "cho an"
-        lower.includes('cho ăn') ||
-        normalized.includes('cho an') ||
-        // "cho 50 gram", "cho 100g", có số + đơn vị
-        /cho\s+\d+/.test(normalized) ||
-        lower.includes('gram') ||
-        /\d+\s*(g|gr|gram|kg)\b/.test(normalized) ||
-        // tiếng Anh
-        lower.includes('feed');
-
-      if (!isFeedLike) {
-        setAckMessage(`Đã nghe: "${transcript}". Đây không giống lệnh cho ăn, nên sẽ không gửi tới máy cho ăn.`);
-        setMicStatus('idle');
-        return;
-      }
-
-      setAckMessage(`Đã nghe: "${transcript}". Đang gửi lệnh cho ăn...`);
-
-      try {
-        const { data: feedData } = await FeedAPI.voice(transcript);
-        setAckMessage(feedData.message || `Đã thực hiện lệnh: "${transcript}"`);
-      } catch (err) {
-        console.error('Voice feed error:', err);
-        setAckMessage(err.response?.data?.message || 'Gửi lệnh cho ăn từ giọng nói thất bại.');
-      }
+      recognitionRef.current = recognition;
+      recognition.start();
     } catch (error) {
-      console.error('Speech module error:', error);
-      setAckMessage(`Lỗi dịch vụ nhận diện giọng nói: ${error.message}`);
-    } finally {
+      console.error('Error starting speech recognition:', error);
+      setAckMessage('Không thể khởi động nhận diện giọng nói.');
       setMicStatus('idle');
-      setLoading(false);
     }
   };
 
@@ -180,28 +226,105 @@ const ManualFeed = () => {
       <section className="grid grid--2">
         <div className="card">
           <h3>Manual Feed</h3>
-          <p>Dispense a single portion immediately.</p>
+          <p>Dispense food</p>
           <button className="btn btn--primary btn--lg" type="button" onClick={handleFeedNow} disabled={loading}>
             {loading ? 'Sending...' : 'Feed Now'}
           </button>
         </div>
         <div className="card">
           <h3>Feed by Voice</h3>
-          <p>Use your microphone and say “feed now”.</p>
+          <p>Say "cho ăn" or "cho ăn 200 gram", "feed" or "feed 200 grams"</p>
+          <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <label htmlFor="language-select" style={{ fontSize: '0.9rem' }}>Language:</label>
+            <select
+              id="language-select"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              disabled={micStatus === 'listening' || micStatus === 'processing'}
+              style={{
+                padding: '0.5rem',
+                borderRadius: '0.5rem',
+                border: '1px solid #e0e7ff',
+                fontSize: '0.9rem',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="vi-VN">Tiếng Việt</option>
+              <option value="en-US">English</option>
+            </select>
+          </div>
           <button
             className={`voice-button ${micStatus === 'listening' ? 'voice-button--listening' : ''}`}
             type="button"
             onClick={handleVoiceFeed}
+            disabled={loading}
           >
             <span className="voice-button__dot" aria-hidden />
             <span className="voice-button__label">
-              {micStatus === 'listening' ? 'Listening…' : 'Hold to Speak'}
+              {micStatus === 'listening' 
+                ? (language === 'vi-VN' ? 'Đang nghe...' : 'Listening...')
+                : micStatus === 'processing' 
+                ? (language === 'vi-VN' ? 'Đang xử lý...' : 'Processing...')
+                : (language === 'vi-VN' ? 'Nhấn để nói' : 'Click to speak')}
             </span>
           </button>
-          <small>Browser will ask for microphone permission.</small>
+          <small>
+            {language === 'vi-VN' 
+              ? 'Trình duyệt sẽ xin quyền sử dụng microphone.'
+              : 'Browser will ask for microphone permission.'}
+          </small>
         </div>
       </section>
-      {ackMessage && <p className="alert alert--info">{ackMessage}</p>}
+      
+      {/* Hiển thị thông tin chi tiết */}
+      <section style={{ marginTop: '2rem' }}>
+        {ackMessage && (
+          <div 
+            className="alert alert--info" 
+            style={{ 
+              whiteSpace: 'pre-line',
+              lineHeight: '1.6',
+              fontSize: '0.95rem',
+            }}
+          >
+            {ackMessage}
+          </div>
+        )}
+        
+        {/* Hiển thị số lượng đã cho ăn */}
+        {lastFeedAmount !== null && (
+          <div 
+            className="card"
+            style={{
+              marginTop: '1rem',
+              backgroundColor: '#f0fdf4',
+              border: '2px solid #10b981',
+            }}
+          >
+            <h3 style={{ color: '#059669', marginBottom: '0.5rem' }}>
+              {language === 'vi-VN' ? 'Lần cho ăn gần nhất' : 'Last Feed'}
+            </h3>
+            <p style={{ fontSize: '1.25rem', fontWeight: '600', color: '#047857', margin: 0 }}>
+              {lastFeedAmount}g
+            </p>
+            {voiceTranscript && (
+              <p style={{ fontSize: '0.9rem', color: '#6b7280', marginTop: '0.5rem', marginBottom: 0 }}>
+                {language === 'vi-VN' ? 'Lệnh:' : 'Command:'} "{voiceTranscript}"
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+      
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+          duration={5000}
+        />
+      )}
     </div>
   );
 };
