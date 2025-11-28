@@ -1,8 +1,8 @@
 import { getWeeklyFeedStats, triggerManualFeed } from "../services/feedService.js";
 
 export const manualFeed = async (req, res) => {
-  // Default amount is 50 grams
-  const amount = 50;
+  // Default amount is 10 grams
+  const amount = 10;
 
   try {
     const feedLog = await triggerManualFeed({
@@ -40,6 +40,27 @@ export const weeklyStats = async (req, res) => {
     console.error("Weekly stats error:", error.message);
     return res.status(500).json({
       message: "Failed to fetch feeding stats",
+      error: error.message,
+    });
+  }
+};
+
+export const recentFeedHistory = async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 20, 100);
+
+  try {
+    const feedLogs = await FeedLog.find({ user: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    return res.json({
+      feedLogs,
+    });
+  } catch (error) {
+    console.error("Recent feed history error:", error.message);
+    return res.status(500).json({
+      message: "Failed to fetch feed history",
       error: error.message,
     });
   }
