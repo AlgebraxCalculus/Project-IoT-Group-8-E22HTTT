@@ -33,8 +33,8 @@ export const parseVoiceCommand = (text = "") => {
   }
 
   // Extract amount (supports both Vietnamese and English)
-  // If no amount specified, default to 10 grams
-  const DEFAULT_AMOUNT = 10;
+  // If no amount specified, default to 50 grams
+  const DEFAULT_AMOUNT = 50;
   const amountMatch = normalized.match(AMOUNT_REGEX);
   
   let amount = DEFAULT_AMOUNT; // Default amount if not specified

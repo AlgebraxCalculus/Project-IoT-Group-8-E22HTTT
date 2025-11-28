@@ -37,7 +37,7 @@ const client = mqtt.connect(brokerUrl, options);
 
 // pending ACKs map: key = issuedAt (string) -> { resolve, reject, timeoutId }
 const pendingAcks = new Map();
-const DEFAULT_ACK_TIMEOUT = 15000; // 15s
+const DEFAULT_ACK_TIMEOUT = 35000; // 35s (ESP32 has 30s feeding timeout + 5s buffer)
 
 client.on("connect", () => {
   isConnected = true;

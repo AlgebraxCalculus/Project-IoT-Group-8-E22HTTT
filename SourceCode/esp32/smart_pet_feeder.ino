@@ -272,7 +272,7 @@ void handleLogic() {
   lcd.print((int)targetWeight); 
   lcd.print("g     ");
 
-  // ĐIỀU KIỆN DỪNG CHÍNH: Đạt đủ lượng thức ăn >= target
+  // ĐIỀU KIỆN DỪNG CHÍNH: Đạt đủ lượng thức ăn >= target 
   if (currentAmount >= (targetWeight - WEIGHT_TOLERANCE)) {
     Serial.printf("Target reached! %.1fg >= %.1fg\n", currentAmount, targetWeight);
     stopFeeding();

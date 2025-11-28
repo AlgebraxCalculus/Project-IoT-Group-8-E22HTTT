@@ -1,8 +1,8 @@
 import { getWeeklyFeedStats, triggerManualFeed } from "../services/feedService.js";
 
 export const manualFeed = async (req, res) => {
-  // Default amount is 10 grams
-  const amount = 10;
+  // Default amount is 50 grams
+  const amount = 50;
 
   try {
     const feedLog = await triggerManualFeed({
