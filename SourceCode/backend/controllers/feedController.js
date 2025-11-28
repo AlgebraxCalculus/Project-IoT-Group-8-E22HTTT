@@ -1,4 +1,3 @@
-import { FeedLog } from "../models/FeedLog.js";
 import { getWeeklyFeedStats, triggerManualFeed } from "../services/feedService.js";
 
 export const manualFeed = async (req, res) => {

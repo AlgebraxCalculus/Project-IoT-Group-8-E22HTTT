@@ -15,7 +15,7 @@ const feedLogSchema = new mongoose.Schema(
     amount: {
       type: Number,
       required: true,
-      min: 1,
+      min: 0,
     },
     targetAmount: {
       type: Number,
