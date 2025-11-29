@@ -1,4 +1,5 @@
 import { getWeeklyFeedStats, triggerManualFeed } from "../services/feedService.js";
+import { FeedLog } from "../models/FeedLog.js";
 
 export const manualFeed = async (req, res) => {
   // Default amount is 10 grams
