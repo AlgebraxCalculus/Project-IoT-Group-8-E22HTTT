@@ -64,7 +64,7 @@ float targetWeight = 0;
 unsigned long feedStartTime = 0;
 String currentMode = "idle";    // "idle", "manual", "scheduled", "voice"
 String currentUserId = "";
-unsigned long currentIssuedAt = 0;
+String currentIssuedAt = ""; // Lưu dạng String để tránh integer overflow với timestamp JavaScript
 
 /************** TIME **************/
 const char* ntpServer = "pool.ntp.org";
@@ -78,7 +78,7 @@ void reconnectMQTT();
 void mqttCallback(char* t, byte* p, unsigned int l);
 void readButton();
 void updateWeight();
-void startFeeding(const String& mode, float amount, const String& userId, unsigned long issuedAt);
+void startFeeding(const String& mode, float amount, const String& userId, const String& issuedAt);
 void stopFeeding();
 void handleLogic();
 void sendTelemetry(bool immediate = false);
@@ -156,7 +156,7 @@ void loop() {
 /******************** CORE LOGIC ********************/
 
 // 1. BẮT ĐẦU CHO ĂN
-void startFeeding(const String& mode, float amount, const String& userId, unsigned long issuedAt) {
+void startFeeding(const String& mode, float amount, const String& userId, const String& issuedAt) {
   if (isFeeding) {
     Serial.println("Already feeding, ignoring command");
     return;
@@ -237,7 +237,7 @@ void stopFeeding() {
   isFeeding = false;
   currentMode = "idle";
   currentUserId = "";
-  currentIssuedAt = 0;
+  currentIssuedAt = "";
   
   delay(2000); // Hiển thị kết quả 2 giây
 }
@@ -302,7 +302,7 @@ void readButton() {
     if (millis() - lastPress > 1000) { // Debounce 1 giây
       lastPress = millis();
       Serial.println("Physical button pressed -> Manual feed 50g");
-      startFeeding("manual", DEFAULT_FEED_AMOUNT, "local-user", millis());
+      startFeeding("manual", DEFAULT_FEED_AMOUNT, "local-user", String(millis()));
     }
   }
 }
@@ -329,7 +329,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String mode = doc["mode"] | "";
   float amount = doc["amount"] | DEFAULT_FEED_AMOUNT;
   String userId = doc["userId"] | "unknown";
-  unsigned long issuedAt = doc["issuedAt"] | 0;
+  String issuedAt = doc["issuedAt"].as<String>(); // Lưu dạng String để tránh overflow
+  
+  Serial.println("Parsed issuedAt: " + issuedAt); // DEBUG
 
   // Validate mode
   if (mode != "manual" && mode != "scheduled" && mode != "voice") {
@@ -398,12 +400,15 @@ void sendFeedingAck(const String& mode, float actualAmount, const String& status
   String out;
   serializeJson(doc, out);
   
+  Serial.println("ACK JSON: " + out); // DEBUG - Hiển thị toàn bộ JSON
+  
   bool published = mqtt.publish(topic_ack.c_str(), out.c_str(), true); // retained = true
   
   Serial.println("ACK sent: " + String(published ? "OK" : "FAILED"));
   Serial.println("  Mode: " + mode);
   Serial.println("  Amount: " + String(actualAmount) + "g");
   Serial.println("  Status: " + status);
+  Serial.println("  issuedAt: " + String(currentIssuedAt)); // DEBUG
 }
 
 void connectWiFi() {

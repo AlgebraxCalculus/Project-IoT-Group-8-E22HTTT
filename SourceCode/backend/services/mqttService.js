@@ -140,7 +140,6 @@ export const publishFeedCommand = (payload = {}, { timeoutMs = DEFAULT_ACK_TIMEO
         pendingAcks.delete(key);
         return reject(error);
       }
-      // published successfully — now waiting for ACK (resolve occurs in client.on('message'))
     });
   });
 
