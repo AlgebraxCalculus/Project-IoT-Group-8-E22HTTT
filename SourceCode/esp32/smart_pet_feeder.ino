@@ -42,7 +42,7 @@ const int LOADCELL_SCK_PIN  = 4;
 HX711 scale;
 const float CALIBRATING = 413.96; 
 float weightCurrentVal = 0.0;
-float weightFoodSpout  = 18.0;
+float weightFoodSpout  = 6.0;
 
 /************** SERVO CONFIG **************/
 const int servoPin     = 13;
@@ -55,7 +55,7 @@ const int buttonPin = 27;
 const int ledPin    = 26;
 
 /************** FEEDING CONFIG **************/
-const float DEFAULT_FEED_AMOUNT = 50.0; // Backend mặc định cũng là 50g
+const float DEFAULT_FEED_AMOUNT = 10.0; // Backend mặc định cũng là 10g
 const unsigned long MAX_FEED_TIME = 30000; // 30 giây timeout (chỉ để safety, không dùng để kiểm tra lượng)
 const float WEIGHT_TOLERANCE = 0.5; // Dung sai ±0.5g để tránh dao động cân
 
@@ -295,13 +295,13 @@ void handleLogic() {
 /******************** INPUT HANDLERS ********************/
 
 void readButton() {
-  // Nút bấm vật lý -> Tạo lệnh Manual Feed với 50g
+  // Nút bấm vật lý -> Tạo lệnh Manual Feed với 10g
   static unsigned long lastPress = 0;
   
   if (digitalRead(buttonPin) == LOW && !isFeeding && currentMode == "idle") {
     if (millis() - lastPress > 1000) { // Debounce 1 giây
       lastPress = millis();
-      Serial.println("Physical button pressed -> Manual feed 50g");
+      Serial.println("Physical button pressed -> Manual feed 10g");
       startFeeding("manual", DEFAULT_FEED_AMOUNT, "local-user", String(millis()));
     }
   }
@@ -341,7 +341,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   // Validate amount
   if (amount <= 0 || amount > 200) {
-    Serial.println("Invalid amount, using default 50g");
+    Serial.println("Invalid amount, using default 10g");
     amount = DEFAULT_FEED_AMOUNT;
   }
 
@@ -357,9 +357,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
 void updateWeight() {
   if (scale.is_ready()) {
-    float val = scale.get_units(3); // Đọc 3 lần để lọc nhiễu
+    float raw = scale.get_units(3); // Đọc 3 lần để lọc nhiễu
     // Lọc giá trị âm
-    weightCurrentVal = (val < 0) ? 0.0 : val;
+    float net = raw - weightFoodSpout;  
+    weightCurrentVal = (net < 0) ? 0.0 : net;
   }
 }
 
