@@ -9,15 +9,8 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { FeedAPI } from '../services/api.js';
-import { createMqttClient } from '../services/mqtt.js';
-import StatusBadge from '../components/StatusBadge.jsx';
-import StatCard from '../components/StatCard.jsx';
-
-const DEVICE_ID = import.meta.env.VITE_DEVICE_ID || 'petfeeder-feed-node-01';
 
 const Dashboard = () => {
-  const [telemetry, setTelemetry] = useState({ weight: 0 });
-  const [clientStatus, setClientStatus] = useState('offline');
   const [weeklyStats, setWeeklyStats] = useState([]);
   const [loadingStats, setLoadingStats] = useState(false);
   const [error, setError] = useState('');
@@ -40,17 +33,6 @@ const Dashboard = () => {
     fetchStats();
   }, []);
 
-  useEffect(() => {
-    const client = createMqttClient({
-      deviceId: DEVICE_ID,
-      onTelemetry: (data) => {
-        setTelemetry((prev) => ({ ...prev, ...data }));
-      },
-      onStatusChange: (status) => setClientStatus(status),
-    });
-    return () => client?.end(true);
-  }, []);
-
   const chartData = useMemo(() => {
     // Backend trả về data với format: { date: "2024-11-14", totalAmount: 350, feedCount: 2 }
     return weeklyStats.map((stat) => {
@@ -64,28 +46,14 @@ const Dashboard = () => {
     });
   }, [weeklyStats]);
 
-  const lastFeedDisplay = telemetry.lastFeed
-    ? new Date(telemetry.lastFeed).toLocaleString()
-    : 'N/A';
-
   return (
     <div className="page">
       <div className="page__header">
         <div>
           <h2>Device Dashboard</h2>
-          <p>Track live telemetry and feeding analytics</p>
-        </div>
-        <div className="status-stack">
-          <p>
-            MQTT status: <StatusBadge status={clientStatus === 'online' ? 'online' : 'offline'} />
-          </p>
+          <p>Feeding analytics and statistics</p>
         </div>
       </div>
-
-      <section className="grid grid--3">
-        <StatCard label="Food Weight" value={`${telemetry.weight ?? 0} g`} description="Live hopper reading" />
-        <StatCard label="Last Feed" value={lastFeedDisplay} description="From telemetry" />
-      </section>
 
       <section className="card">
         <div className="card__header">
