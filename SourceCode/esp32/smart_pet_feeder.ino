@@ -42,7 +42,7 @@ const int LOADCELL_SCK_PIN  = 4;
 HX711 scale;
 const float CALIBRATING = 413.96; 
 float weightCurrentVal = 0.0;
-float weightFoodSpout  = 18.0;
+float weightFoodSpout  = 6.0;
 
 /************** SERVO CONFIG **************/
 const int servoPin     = 13;
@@ -55,7 +55,7 @@ const int buttonPin = 27;
 const int ledPin    = 26;
 
 /************** FEEDING CONFIG **************/
-const float DEFAULT_FEED_AMOUNT = 50.0; // Backend mặc định cũng là 50g
+const float DEFAULT_FEED_AMOUNT = 10.0; // Backend mặc định cũng là 10g
 const unsigned long MAX_FEED_TIME = 30000; // 30 giây timeout (chỉ để safety, không dùng để kiểm tra lượng)
 const float WEIGHT_TOLERANCE = 0.5; // Dung sai ±0.5g để tránh dao động cân
 
@@ -64,7 +64,7 @@ float targetWeight = 0;
 unsigned long feedStartTime = 0;
 String currentMode = "idle";    // "idle", "manual", "scheduled", "voice"
 String currentUserId = "";
-unsigned long currentIssuedAt = 0;
+String currentIssuedAt = ""; // Lưu dạng String để tránh integer overflow với timestamp JavaScript
 
 /************** TIME **************/
 const char* ntpServer = "pool.ntp.org";
@@ -78,7 +78,7 @@ void reconnectMQTT();
 void mqttCallback(char* t, byte* p, unsigned int l);
 void readButton();
 void updateWeight();
-void startFeeding(const String& mode, float amount, const String& userId, unsigned long issuedAt);
+void startFeeding(const String& mode, float amount, const String& userId, const String& issuedAt);
 void stopFeeding();
 void handleLogic();
 void sendTelemetry(bool immediate = false);
@@ -156,7 +156,7 @@ void loop() {
 /******************** CORE LOGIC ********************/
 
 // 1. BẮT ĐẦU CHO ĂN
-void startFeeding(const String& mode, float amount, const String& userId, unsigned long issuedAt) {
+void startFeeding(const String& mode, float amount, const String& userId, const String& issuedAt) {
   if (isFeeding) {
     Serial.println("Already feeding, ignoring command");
     return;
@@ -237,7 +237,7 @@ void stopFeeding() {
   isFeeding = false;
   currentMode = "idle";
   currentUserId = "";
-  currentIssuedAt = 0;
+  currentIssuedAt = "";
   
   delay(2000); // Hiển thị kết quả 2 giây
 }
@@ -295,14 +295,14 @@ void handleLogic() {
 /******************** INPUT HANDLERS ********************/
 
 void readButton() {
-  // Nút bấm vật lý -> Tạo lệnh Manual Feed với 50g
+  // Nút bấm vật lý -> Tạo lệnh Manual Feed với 10g
   static unsigned long lastPress = 0;
   
   if (digitalRead(buttonPin) == LOW && !isFeeding && currentMode == "idle") {
     if (millis() - lastPress > 1000) { // Debounce 1 giây
       lastPress = millis();
-      Serial.println("Physical button pressed -> Manual feed 50g");
-      startFeeding("manual", DEFAULT_FEED_AMOUNT, "local-user", millis());
+      Serial.println("Physical button pressed -> Manual feed 10g");
+      startFeeding("manual", DEFAULT_FEED_AMOUNT, "local-user", String(millis()));
     }
   }
 }
@@ -329,7 +329,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String mode = doc["mode"] | "";
   float amount = doc["amount"] | DEFAULT_FEED_AMOUNT;
   String userId = doc["userId"] | "unknown";
-  unsigned long issuedAt = doc["issuedAt"] | 0;
+  String issuedAt = doc["issuedAt"].as<String>(); // Lưu dạng String để tránh overflow
+  
+  Serial.println("Parsed issuedAt: " + issuedAt); // DEBUG
 
   // Validate mode
   if (mode != "manual" && mode != "scheduled" && mode != "voice") {
@@ -339,7 +341,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   // Validate amount
   if (amount <= 0 || amount > 200) {
-    Serial.println("Invalid amount, using default 50g");
+    Serial.println("Invalid amount, using default 10g");
     amount = DEFAULT_FEED_AMOUNT;
   }
 
@@ -355,9 +357,10 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
 void updateWeight() {
   if (scale.is_ready()) {
-    float val = scale.get_units(3); // Đọc 3 lần để lọc nhiễu
+    float raw = scale.get_units(3); // Đọc 3 lần để lọc nhiễu
     // Lọc giá trị âm
-    weightCurrentVal = (val < 0) ? 0.0 : val;
+    float net = raw - weightFoodSpout;  
+    weightCurrentVal = (net < 0) ? 0.0 : net;
   }
 }
 
@@ -398,12 +401,15 @@ void sendFeedingAck(const String& mode, float actualAmount, const String& status
   String out;
   serializeJson(doc, out);
   
+  Serial.println("ACK JSON: " + out); // DEBUG - Hiển thị toàn bộ JSON
+  
   bool published = mqtt.publish(topic_ack.c_str(), out.c_str(), true); // retained = true
   
   Serial.println("ACK sent: " + String(published ? "OK" : "FAILED"));
   Serial.println("  Mode: " + mode);
   Serial.println("  Amount: " + String(actualAmount) + "g");
   Serial.println("  Status: " + status);
+  Serial.println("  issuedAt: " + String(currentIssuedAt)); // DEBUG
 }
 
 void connectWiFi() {
